@@ -98,7 +98,7 @@ DEBUG=True
 SECRET_KEY=replace-with-a-development-secret
 DATABASE_URL=postgresql://rpg:rpg@localhost:5432/ai_dungeon
 GEMINI_API_KEY=your-api-key
-AI_MODEL=gemini-2.5-flash
+AI_MODEL=gemini-3.6-flash
 ```
 
 The PostgreSQL database and user must exist before running migrations.
@@ -240,28 +240,6 @@ Important test cases include:
 - Player decisions persist after restarting the application.
 - Invalid AI responses do not corrupt game state.
 - One player's sessions cannot be accessed by another user.
-
-## Development milestones
-
-### Milestone 1 — Foundation
-
-Django, PostgreSQL, React, API connectivity, and basic models.
-
-### Milestone 2 — AI integration
-
-Gemini integration, action interpretation, narration, and turn persistence.
-
-### Milestone 3 — RPG mechanics
-
-Characters, attributes, dice rolls, inventory, and combat.
-
-### Milestone 4 — Campaign content
-
-YAML importing, locations, NPCs, quests, and world memory.
-
-### Milestone 5 — Playable prototype
-
-Complete The Hollow Vale, test branching decisions, and improve reliability.
 
 ## Current status
 

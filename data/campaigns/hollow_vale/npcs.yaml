@@ -35,9 +35,21 @@ npcs:
       - "Discover what happened to his brother."
 
     public_knowledge:
-      - "Several villagers have disappeared."
-      - "The forest has become dangerous."
-      - "The village elder has been acting strangely."
+      - "Several villagers have disappeared recently."
+      - "The village has become increasingly uneasy."
+
+    knowledge:
+      - id: chapel_rumors
+        text: "Garrick has heard strange noises near the chapel."
+        conditions:
+          min_trust: 30
+
+      - id: missing_villagers_clue
+        text: "Garrick saw someone leaving the village at night."
+        conditions:
+          min_trust: 50
+          required_flags:
+            - knows_about_disappearances
 
     secrets:
       - id: elder_at_watchtower
@@ -137,7 +149,7 @@ npcs:
       max_hp: 10
       defense: 10
       hostility: 0
-      trust: -1
+      trust: -10
       alive: true
       recruited: false
 
