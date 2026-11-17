@@ -16,6 +16,11 @@ npcs:
         - protective
         - practical
         - loyal
+      social_resistances:
+        persuade: 3
+        intimidate: -2
+        deceive: 4
+        compliment: 2
       speaking_style: "Short, direct sentences."
       temperament: guarded
 
