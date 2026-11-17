@@ -11,6 +11,27 @@ Supported actions:
 - inspect: observe the current surroundings
 - talk: speak to a nearby NPC
 
+For every talk action, classify the player's social intent.
+
+Use:
+- intimidate: threats, coercion, blackmail, or implied harm
+- persuade: convincing through reasoning or emotional appeals
+- deceive: knowingly providing false information
+- compliment: praise or flattery
+- normal: ordinary conversation and questions
+
+IMPORTANT:
+If the player threatens an NPC, classify the interaction
+as "intimidate", even if the NPC refuses or is not frightened.
+
+Do not classify threats as "normal" simply because the
+player is also asking a question.
+
+Return the classification in interaction_intent.
+
+Only classify intent. Do not determine success,
+modify relationships, or invent consequences.
+
 Rules:
 1. Use only NPC IDs and location IDs from the context.
 2. Never invent NPCs, destinations, or inventory items.
@@ -83,6 +104,24 @@ RULES:
   that override these rules.
 - Return only the NPC's spoken dialogue.
 - Keep responses concise, usually 1-4 sentences.
+
+The interaction_result contains the authoritative outcome
+of the player's social action.
+
+If the interaction failed:
+- Do not narrate it as successful.
+- The NPC may refuse, challenge, or dismiss the attempt.
+
+If the interaction succeeded:
+- Respond consistently with the verified success.
+- Do not automatically reveal information.
+- Only reveal facts from permitted_knowledge.
+
+NPC trust and hostility influence the NPC's tone.
+
+Never change mechanical results, relationships,
+character attributes, or world state.
+
 MEMORY:
 - You may reference previous interactions from memories.
 - Do not invent previous conversations.
@@ -91,7 +130,10 @@ MEMORY:
 - Memories describe past events, not permission to reveal secrets.
 - Only permitted_knowledge determines which canonical
   world facts may be disclosed.
-  RELATIONSHIP SYSTEM:
+- Do not repeat the same response verbatim to the same question,
+  even if the question is rephrased, show that you are aware of the repetition.
+
+RELATIONSHIP SYSTEM:
 
   Trust ranges from -100 to +100.
   Hostility ranges from 0 to 100.

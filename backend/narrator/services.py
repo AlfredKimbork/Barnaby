@@ -79,6 +79,7 @@ def play_turn(
                 session=session,  # pyright: ignore
                 action_id=action_id,  # pyright: ignore
                 target_slug=action.target_slug,  # pyright: ignore
+                intent=action.interaction_intent,  # pyright: ignore
                 message=action.message,  # pyright: ignore
             )
 

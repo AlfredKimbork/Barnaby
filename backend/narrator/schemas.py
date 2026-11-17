@@ -22,11 +22,20 @@ class TalkAction(BaseModel):
     type: Literal["talk"]
     target_slug: str
     message: str
+    interaction_intent: InteractionAction = "normal"
 
 
 GameAction = Annotated[
     AttackAction | MoveAction | InspectAction | TalkAction,
     Field(discriminator="type"),
+]
+
+InteractionAction = Literal[
+    "persuade",
+    "intimidate",
+    "decieve",
+    "compliment",
+    "normal",
 ]
 
 
@@ -36,6 +45,7 @@ class AIActionResponse(BaseModel):
     weapon_slug: str | None = None
     destination_slug: str | None = None
     message: str | None = None
+    interaction_intent: InteractionAction = "normal"
 
     @model_validator(mode="after")
     def valide_action(self):

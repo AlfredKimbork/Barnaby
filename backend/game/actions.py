@@ -3,6 +3,7 @@ from uuid import UUID
 from django.core.exceptions import ValidationError
 from django.db import transaction
 
+from game.interactions import resolve_interaction
 from game.mechanics import resolve_attack
 from game.memory import remember
 from game.models import GameSession, GameTurn, NPCState
@@ -300,6 +301,7 @@ def process_talk(
     session: GameSession,
     action_id: UUID,
     target_slug: str,
+    intent: str,
     message: str,
 ) -> GameTurn:
     session = (
@@ -344,6 +346,12 @@ def process_talk(
 
     narration = f"You speak to {npc_state.npc.name}."
 
+    interaction = resolve_interaction(
+        npc_state=npc_state,  # pyright: ignore
+        intent=intent,
+        modifier=0,
+    )
+
     return create_turn(
         session=session,
         action_id=action_id,
@@ -354,6 +362,13 @@ def process_talk(
             "target": target_slug,
             "message": message,
             "npc_name": npc_state.npc.name,
+            "interaction": {
+                "intent": interaction.intent,
+                "success": interaction.success,
+                "roll": interaction.roll,
+                "difficulty": interaction.difficulty,
+                "relationship_event": interaction.relationship_event,
+            },
             "npc_trust": npc_state.trust,
             "npc_hostility": npc_state.hostility,
         },
