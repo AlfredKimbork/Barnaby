@@ -136,6 +136,7 @@ class GameSessionViewSet(viewsets.GenericViewSet):
                     action_id=data["action_id"],
                     target_slug=data["target_slug"],
                     message=data["message"],
+                    intent=data["intent"],
                 )
             case _:
                 raise ValidationError(f"Invalid action type: {action_type}")

@@ -137,6 +137,10 @@ class TalkActionSerializer(serializers.Serializer):
         max_length=1000,
         trim_whitespace=True,
     )
+    intent = serializers.ChoiceField(
+        choices=["persuade", "intimidate", "deceive", "compliment", "normal"],
+        default="normal",
+    )
 
 
 class PlayActionSerializer(serializers.Serializer):

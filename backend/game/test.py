@@ -8,6 +8,7 @@ from django.urls import reverse
 from rest_framework.test import APIClient
 
 from characters.models import Character
+from game.interactions import calculate_interaction_dc
 from game.knowledge import get_permitted_knowledge
 from game.mechanics import resolve_attack
 from game.models import GameTurn, NPCState, PlayerState, QuestState
@@ -769,6 +770,7 @@ class TalkActionTest(TestCase):
                 "type": "talk",
                 "target": "garrick",
                 "message": message,
+                "intent": "normal",
             },
             format="json",
         )
@@ -972,3 +974,56 @@ class NPCKnowledgeTest(TestCase):
 
         self.assertEqual(npc_state.trust, -100)
         self.assertEqual(npc_state.hostility, 100)
+
+    def test_personality_affect_difficulty(self):
+        npc_state = NPCState.objects.get(
+            session=self.session,
+            npc=self.npc,
+        )
+
+        npc_state.npc.data["personality"] = {
+            "social_resistance": {
+                "persuade": 5,
+            }
+        }
+        dc = calculate_interaction_dc(npc_state=npc_state, intent="persuade")
+
+        self.assertEqual(dc, 17)
+
+    def test_trust_reduces_persuasion_difficulty(self):
+        npc_state = NPCState.objects.get(
+            session=self.session,
+            npc=self.npc,
+        )
+
+        npc_state.trust = 60
+        npc_state.hostility = 0
+        npc_state.save(update_fields=["trust", "hostility"])
+
+        neutral_dc = 12
+
+        trusted_dc = calculate_interaction_dc(
+            npc_state=npc_state,
+            intent="persuade",
+        )
+
+        self.assertLess(trusted_dc, neutral_dc)
+
+    def test_hostility_increases_persuasion_difficulty(self):
+        npc_state = NPCState.objects.get(
+            session=self.session,
+            npc=self.npc,
+        )
+
+        npc_state.trust = 0
+        npc_state.hostility = 80
+        npc_state.save(update_fields=["trust", "hostility"])
+
+        neutral_dc = 12
+
+        hostile_dc = calculate_interaction_dc(
+            npc_state=npc_state,
+            intent="persuade",
+        )
+
+        self.assertGreater(hostile_dc, neutral_dc)

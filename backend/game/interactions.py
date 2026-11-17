@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from random import randint
+from typing import Literal
 
 from game.models import NPCState
 from game.relationships import apply_relationship_event
@@ -14,13 +15,42 @@ class InteractionResult:
     relationship_event: str | None
 
 
-INTERACTION_RULES = {
-    "persuade": {"difficulty": 12},
-    "intimidate": {"difficulty": 14},
-    "decieve": {"difficulty": 15},
-    "compliment": {"difficulty": None},
-    "normal": {"difficulty": None},
+BASE_DIFFICULTIES = {
+    "persuade": 12,
+    "intimidate": 14,
+    "decieve": 15,
+    "compliment": 10,
 }
+
+
+def calculate_interaction_dc(
+    *, npc_state: NPCState, intent: str, context_modifier: int = 0
+) -> int:
+    if intent not in BASE_DIFFICULTIES:
+        raise ValueError(f"Invalid intent: {intent}")
+
+    personality = npc_state.npc.data.get("personality", {})  # pyright: ignore
+
+    resistance = personality.get("social_resistance", {})
+
+    base = BASE_DIFFICULTIES[intent]
+    personality_modifier = resistance.get(intent, 0)
+
+    trust = npc_state.trust
+    hostility = npc_state.hostility
+
+    if intent in {"persuade", "deceive", "compliment"}:
+        relationship_modifier = -(trust // 20) + (hostility // 20)  # pyright: ignore
+    else:
+        relationship_modifier = hostility // 20  # pyright: ignore
+
+    return max(
+        5,
+        min(
+            30,
+            base + personality_modifier + relationship_modifier + context_modifier,
+        ),
+    )
 
 
 def resolve_interaction(
@@ -29,10 +59,14 @@ def resolve_interaction(
     intent: str,
     modifier: int = 0,
 ) -> InteractionResult:
-    if intent not in INTERACTION_RULES:
+    if intent not in BASE_DIFFICULTIES and intent != "normal":
         raise ValueError(f"Invalid intent: {intent}")
 
-    difficulty = INTERACTION_RULES[intent]["difficulty"]
+    difficulty = (
+        calculate_interaction_dc(npc_state=npc_state, intent=intent)
+        if intent != "normal"
+        else None
+    )
 
     roll = None
     success = True
