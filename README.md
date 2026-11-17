@@ -1,4 +1,4 @@
-# Gen RPG
+# Barnaby
 
 A single-player, D&D-inspired role-playing game powered by an AI Dungeon Master.
 
