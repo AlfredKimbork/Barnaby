@@ -22,7 +22,7 @@ class InteractionResult:
 BASE_DIFFICULTIES = {
     "persuade": 12,
     "intimidate": 14,
-    "decieve": 15,
+    "deceive": 15,
     "compliment": 10,
 }
 
@@ -42,7 +42,7 @@ def calculate_interaction_dc(
 
     personality = npc_state.npc.data.get("personality", {})  # pyright: ignore
 
-    resistance = personality.get("social_resistance", {})
+    resistance = personality.get("social_resistances", {})
 
     base = BASE_DIFFICULTIES[intent]
     personality_modifier = resistance.get(intent, 0)
@@ -51,7 +51,7 @@ def calculate_interaction_dc(
     hostility = npc_state.hostility
 
     if intent in {"persuade", "deceive", "compliment"}:
-        relationship_modifier = -(trust // 20) + (hostility // 20)  # pyright: ignore
+        relationship_modifier = -int(trust // 20) + hostility // 20  # pyright: ignore
     else:
         relationship_modifier = hostility // 20  # pyright: ignore
 
@@ -107,14 +107,16 @@ def resolve_interaction(
     relationship_event = None
 
     match intent:
-        case "persuade":
-            relationship_event = "helped_npc" if success else "ignored_npc"
         case "intimidate":
-            relationship_event = "threatened_npc" if success else "mocked_npc"
-        case "decieve":
-            relationship_event = "lied_to_npc" if success else "praised_npc"
+            relationship_event = "threatened_npc"
+
+        case "deceive":
+            if not success:
+                relationship_event = "lied_to_npc"
+
         case "compliment":
-            relationship_event = "praised_npc" if success else "mocked_npc"
+            if success:
+                relationship_event = "praised_npc"
 
     if relationship_event:
         apply_relationship_event(

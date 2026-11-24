@@ -96,18 +96,6 @@ class Character(models.Model):
         score = getattr(self, attribute)
         return (score - 10) // 2
 
-    def take_damage(self, amount: int) -> None:
-        if amount < 0:
-            raise ValueError("Damage amount cannot be negative")
-        self.hp = max(self.hp - amount, 0)  # pyright: ignore
-        self.save(update_fields=["hp"])
-
-    def heal(self, amount: int) -> None:
-        if amount < 0:
-            raise ValueError("Heal amount cannot be negative")
-        self.hp = min(self.hp + amount, self.max_hp)  # pyright: ignore
-        self.save(update_fields=["hp"])
-
     @property
     def proficiency_bonus(self) -> int:
         return 2 + (self.level - 1) // 4  # pyright: ignore

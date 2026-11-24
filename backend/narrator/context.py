@@ -1,3 +1,4 @@
+from game.interactables import get_visible_interactables
 from game.knowledge import get_permitted_knowledge
 from game.memory import get_npc_memories
 from game.models import GameSession, GameTurn, NPCState
@@ -19,6 +20,7 @@ def build_interpreter_context(session: GameSession):
             "name": location.name,
             "description": location.description,
         },
+        "interactables": get_visible_interactables(session),
         "connections": location.data.get("connections", []),  # pyright: ignore
         "npcs": [
             {
@@ -31,7 +33,9 @@ def build_interpreter_context(session: GameSession):
     }
 
 
-def build_dialogue_context(session: GameSession, action: AIActionResponse):
+def build_dialogue_context(
+    session: GameSession, action: AIActionResponse, turn: GameTurn
+):
     target_slug = action.target_slug
 
     npc_state = (
@@ -62,6 +66,7 @@ def build_dialogue_context(session: GameSession, action: AIActionResponse):
             "slug": session.current_location.slug,  # pyright: ignore
             "name": session.current_location.name,
         },
+        "interaction_result": turn.mechanical_result.get("interaction", {}),  # pyright: ignore
     }
 
 
@@ -93,13 +98,10 @@ def build_narrator_context(session: GameSession, turn: GameTurn):
             }
         )
 
-    previous_turns = (
-        GameTurn.objects.filter(
-            session=session,
-        )
-        .exclude(pk=session.pk)
-        .order_by("-number")
-    )
+    previous_turns = GameTurn.objects.filter(
+        session=session,
+        number__lt=turn.number,
+    ).order_by("-number")[:15]
 
     history = [
         {
@@ -115,6 +117,7 @@ def build_narrator_context(session: GameSession, turn: GameTurn):
             "name": location.name,
             "description": location.description,
         },
+        "interactables": get_visible_interactables(session),
         "npcs": visible_npcs,
         "player": {
             "inventory": session.player_state.inventory,  # pyright: ignore

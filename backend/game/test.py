@@ -231,7 +231,7 @@ class GameSessionTests(TestCase):
 
 
 class AttackMechanicsTest(TestCase):
-    @patch("game.mechanics.roll_d20", return_value=15)
+    @patch("game.mechanics.roll_d20", return_value=(15, (15,)))
     def test_successful_attack(self, mock_roll):
         result = resolve_attack(
             strength=14,
@@ -243,7 +243,7 @@ class AttackMechanicsTest(TestCase):
         self.assertEqual(result.total, 17)  # pyright: ignore
         self.assertEqual(result.damage, 7)  # pyright: ignore
 
-    @patch("game.mechanics.roll_d20", return_value=1)
+    @patch("game.mechanics.roll_d20", return_value=(1, (1,)))
     def test_natural_one_always_miss(self, mock_roll):
         result = resolve_attack(
             strength=20,
@@ -342,7 +342,7 @@ class AttackActionTest(TestCase):
             format="json",
         )
 
-    @patch("game.mechanics.roll_d20", return_value=15)
+    @patch("game.mechanics.roll_d20", return_value=(15, (15,)))
     def test_attack_creates_turn_and_deals_damage(self, mock_roll):
         response = self.attack()
 
@@ -358,7 +358,7 @@ class AttackActionTest(TestCase):
         self.assertEqual(npc_state.hp, 13)  # pyright: ignore
         self.assertEqual(GameTurn.objects.filter(session=self.session).count(), 1)  # pyright: ignore
 
-    @patch("game.mechanics.roll_d20", return_value=15)
+    @patch("game.mechanics.roll_d20", return_value=(15, (15,)))
     def test_duplicate_action_does_not_deal_damage_twice(self, mock_roll):
         action_id = uuid4()
 
@@ -969,7 +969,7 @@ class NPCKnowledgeTest(TestCase):
         )
 
         npc_state.npc.data["personality"] = {
-            "social_resistance": {
+            "social_resistances": {
                 "persuade": 5,
             }
         }
@@ -1052,7 +1052,7 @@ class InteractionMechanicsTest(TestCase):
                     "hostility": 0,
                 },
                 "personality": {
-                    "social_resistance": {
+                    "social_resistances": {
                         "persuade": 5,
                         "intimidate": 3,
                         "deceive": 4,

@@ -6,6 +6,7 @@ from django.core.exceptions import ValidationError
 from rest_framework.exceptions import APIException
 
 from game.actions import process_attack, process_inspect, process_movement, process_talk
+from game.interactables import process_interactable
 from game.memory import remember
 from game.models import GameSession, GameTurn, NPCState
 from narrator.context import (
@@ -82,6 +83,14 @@ def play_turn(
                 intent=action.interaction_intent,  # pyright: ignore
                 message=action.message,  # pyright: ignore
             )
+        case "interact":
+            turn = process_interactable(
+                session=session,  # pyright: ignore
+                action_id=action_id,  # pyright: ignore
+                target_slug=action.target_slug,  # pyright: ignore
+                operation=action.operation,  # pyright: ignore
+                item_slug=action.item_slug,  # pyright: ignore
+            )
 
         case _:
             raise ValidationError(f"Invalid action type: {action.type}")
@@ -95,6 +104,7 @@ def play_turn(
         dialogue_context = build_dialogue_context(
             session,
             action,  #   pyright: ignore
+            turn,  #   pyright: ignore
         )
 
         try:
@@ -105,6 +115,8 @@ def play_turn(
 
         result = turn.mechanical_result  # pyright: ignore
         result["response"] = dialogue  # pyright: ignore
+
+        turn.save(update_fields=["mechanical_result"])  # pyright: ignore
 
         npc_state = NPCState.objects.get(
             session=session,

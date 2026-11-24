@@ -16,12 +16,26 @@ class CampaignSchema(Schema):
     dm_secret: dict[str, Any] = Field(default_factory=dict)
 
 
+class InteractableSchema(Schema):
+    id: str
+    description: str
+
+    locked: bool = False
+    unlock_dc: int = Field(default=14, ge=5, le=30)
+
+    discovery: str | None = None
+    investigation_dc: int = Field(default=10, ge=5, le=30)
+
+    contents: list[str] = Field(default_factory=list)
+
+
 class LocationSchema(Schema):
     id: str
     name: str
     type: str
     description: str = ""
     npcs: list[str] = Field(default_factory=list)
+    interactables: list[InteractableSchema] = Field(default_factory=list)
     connections: list[str] = Field(default_factory=list)
     encounters: list[str] = Field(default_factory=list)
 
@@ -140,6 +154,8 @@ class CampaignBundle(BaseModel):
         if start not in locations:
             raise ValueError(f"Starting location '{start}' not found in locations")
 
+        items = {item.id for item in self.items}
+
         for location in self.locations:
             for target in location.connections:
                 if target not in locations:
@@ -166,4 +182,18 @@ class CampaignBundle(BaseModel):
                     raise ValueError(
                         f"Encounter '{encounter.id}' has a reference to non-existent Location '{encounter.location}'"
                     )
+
+            object_id = [obj.id for obj in location.interactables]
+
+            if len(object_id) != len(set(object_id)):
+                raise ValueError(
+                    f"Duplicate Interactable IDs found in Location '{location.id}'"
+                )
+
+            for obj in location.interactables:
+                for item_id in obj.contents:
+                    if item_id not in items:
+                        raise ValueError(
+                            f"Interactable '{obj.id}' in Location '{location.id}' has a reference to non-existent Item '{item_id}'"
+                        )
         return self

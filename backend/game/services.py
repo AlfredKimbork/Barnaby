@@ -3,6 +3,7 @@ from copy import deepcopy
 from django.db import transaction
 
 from characters.models import Character
+from game.interactables import initialize_interactables
 from world.models import NPC, Campaign, Location, Quest
 
 from .models import GameSession, NPCState, PlayerState, QuestState
@@ -82,5 +83,7 @@ def create_game_session(
             )
         ]
     )
+
+    initialize_interactables(session)
 
     return session

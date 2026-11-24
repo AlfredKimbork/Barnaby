@@ -171,3 +171,37 @@ class QuestState(models.Model):
                 name="unique_session_quest",
             ),
         )
+
+
+class InteractableState(models.Model):
+    objects = models.Manager()
+
+    session = models.ForeignKey(
+        GameSession,
+        on_delete=models.CASCADE,
+        related_name="interactable_states",
+    )
+
+    location = models.ForeignKey(
+        Location,
+        on_delete=models.PROTECT,
+    )
+
+    slug = models.CharField(max_length=100)
+
+    locked = models.BooleanField(default=False)  # pyright: ignore
+    discovered = models.BooleanField(default=False)  # pyright: ignore
+
+    contents = models.JSONField(default=list, blank=True)
+    state = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        constraints = (
+            models.UniqueConstraint(
+                fields=["session", "location", "slug"],
+                name="unique_session_location_interactable",
+            ),
+        )
+
+    def __str__(self):
+        return f"{self.location.slug}/{self.slug}"  # pyright: ignore

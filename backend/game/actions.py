@@ -4,6 +4,7 @@ from uuid import UUID
 from django.core.exceptions import ValidationError
 from django.db import transaction
 
+from game.interactables import get_visible_interactables
 from game.interactions import resolve_interaction
 from game.mechanics import resolve_attack
 from game.memory import remember
@@ -250,7 +251,7 @@ def process_inspect(
     ]
 
     connections = location.data.get("connections", [])  # pyright: ignore
-    interactables = location.data.get("interactables", [])  # pyright: ignore
+    interactables = get_visible_interactables(session)
 
     narration = f"You look around {location.name}. {location.description} "
 
