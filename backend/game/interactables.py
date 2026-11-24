@@ -6,6 +6,7 @@ from django.db import transaction
 from pydantic import ValidationError
 
 from game.checks import resolve_skill_check
+from game.events import GameEvent
 from game.models import GameSession, GameTurn, InteractableState, PlayerState
 from game.turns import create_turn, get_existing_turn
 from world.models import Location
@@ -230,10 +231,23 @@ def process_interactable(
     result["locked"] = state.locked
     result["discovered"] = state.discovered
 
-    return create_turn(
-        session=session,
-        action_id=action_id,
-        player_action=f"{operation} {target_slug}",
-        narration="",
-        mechanical_result=result,
+    events = []
+
+    for consequence in result["consequences"]:
+        events.append(
+            GameEvent(
+                type=consequence["type"],
+                target=target_slug,
+                location=location.slug,  # pyright: ignore
+                item=consequence.get("item"),
+            )
+        )
+
+    return create_turn(  # pyright: ignore
+        session=session,  # pyright: ignore
+        action_id=action_id,  # pyright: ignore
+        player_action=f"{operation} {target_slug}",  # pyright: ignore
+        narration="",  # pyright: ignore
+        mechanical_result=result,  # pyright: ignore
+        events=events,  # pyright: ignore
     )

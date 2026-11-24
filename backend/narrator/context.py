@@ -2,6 +2,7 @@ from game.interactables import get_visible_interactables
 from game.knowledge import get_permitted_knowledge
 from game.memory import get_npc_memories
 from game.models import GameSession, GameTurn, NPCState
+from game.quests import get_visible_quests
 from narrator.schemas import AIActionResponse
 
 
@@ -130,4 +131,5 @@ def build_narrator_context(session: GameSession, turn: GameTurn):
             "player_action": turn.player_action,
             "mechanical_result": turn.mechanical_result,
         },
+        "quests": get_visible_quests(session),
     }

@@ -4,6 +4,7 @@ from uuid import UUID
 from django.core.exceptions import ValidationError
 from django.db import transaction
 
+from game.events import GameEvent
 from game.interactables import get_visible_interactables
 from game.interactions import resolve_interaction
 from game.mechanics import resolve_attack
@@ -82,6 +83,8 @@ def process_attack(
     if weapon_damage is None:
         raise ValueError(f"Weapon '{weapon_slug}' is not a valid weapon.")
 
+    events = []
+
     defense = target.state.get("defense", 10)
 
     result = resolve_attack(
@@ -94,6 +97,16 @@ def process_attack(
     target.alive = target.hp > 0
     target.hostility = max(target.hostility, 1)
     target.save(update_fields=["hp", "alive", "hostility"])
+
+    if not target.alive:
+        events.append(
+            GameEvent(
+                type="npc_killed",
+                target=target_slug,
+                npc=target_slug,
+                location=target.current_location.slug,
+            )
+        )
 
     narration = (
         f"You attack {target.npc.name} with your {weapon_slug.replace('_', ' ')}. "
@@ -108,11 +121,11 @@ def process_attack(
         narration += f"You miss! {target.npc.name} has {target.hp} HP remaining. "
 
     turn = create_turn(
-        session=session,
-        action_id=action_id,
-        player_action=f"Attack {target_slug} with {weapon_slug}",
-        narration=narration,
-        mechanical_result={
+        session=session,  # pyright: ignore
+        action_id=action_id,  # pyright: ignore
+        player_action=f"Attack {target_slug} with {weapon_slug}",  # pyright: ignore
+        narration=narration,  # pyright: ignore
+        mechanical_result={  # pyright: ignore
             "type": "attack",
             "target": target_slug,
             "weapon": weapon_slug,
@@ -120,17 +133,18 @@ def process_attack(
             "npc_trust": target.trust,  # pyright: ignore
             "npc_hostility": target.hostility,  # pyright: ignore
         },
+        events=events,  # pyright: ignore
     )
 
     apply_relationship_event(npc_state=target, event="attacked_npc")  # pyright: ignore
     remember(
         npc_state=target,
-        turn=turn,
+        turn=turn,  # pyright: ignore
         summary=f"Player attacked {target.npc.name} using {weapon_slug}",
         importance=5,
     )  # pyright: ignore
 
-    return turn
+    return turn  # pyright: ignore
 
 
 @transaction.atomic
@@ -189,15 +203,22 @@ def process_movement(
     narration = f"You travel from {current.name} to {destination.name}."
 
     return create_turn(
-        session=session,
-        action_id=action_id,
-        player_action=f"Move to {destination_slug}",
-        narration=narration,
-        mechanical_result={
+        session=session,  # pyright: ignore
+        action_id=action_id,  # pyright: ignore
+        player_action=f"Move to {destination_slug}",  # pyright: ignore
+        narration=narration,  # pyright: ignore
+        mechanical_result={  # pyright: ignore
             "type": "move",
             "from": current.slug,  # pyright: ignore
             "destination": destination.slug,  # pyright: ignore
         },
+        events=[  # pyright: ignore
+            GameEvent(
+                type="location_entered",  # pyright: ignore
+                target=destination_slug,
+                location=destination.slug,
+            )
+        ],
     )
 
 
@@ -260,11 +281,11 @@ def process_inspect(
         narration += f"You notice {npc_names} nearby."
 
     return create_turn(
-        session=session,
-        action_id=action_id,
-        player_action="Inspect surroundings",
-        narration=narration,
-        mechanical_result={
+        session=session,  # pyright: ignore
+        action_id=action_id,  # pyright: ignore
+        player_action="Inspect surroundings",  # pyright: ignore
+        narration=narration,  # pyright: ignore
+        mechanical_result={  # pyright: ignore
             "type": "inspect",
             "location": {
                 "slug": location.slug,  # pyright: ignore
@@ -354,12 +375,12 @@ def process_talk(
         intent=intent,
     )
 
-    return create_turn(
-        session=session,
-        action_id=action_id,
-        player_action=f"Talk to {target_slug}: {message}",
-        narration=narration,
-        mechanical_result={
+    return create_turn(  # pyright: ignore
+        session=session,  # pyright: ignore
+        action_id=action_id,  # pyright: ignore
+        player_action=f"Talk to {target_slug}: {message}",  # pyright: ignore
+        narration=narration,  # pyright: ignore
+        mechanical_result={  # pyright: ignore
             "type": "talk",
             "target": target_slug,
             "message": message,
@@ -368,4 +389,12 @@ def process_talk(
             "npc_trust": npc_state.trust,
             "npc_hostility": npc_state.hostility,
         },
+        events=[  # pyright: ignore
+            GameEvent(
+                type="npc_talked_to",
+                target=target_slug,
+                npc=target_slug,
+                location=session.current_location.slug,  # pyright: ignore
+            )
+        ],
     )

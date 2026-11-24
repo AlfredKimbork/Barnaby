@@ -1,8 +1,11 @@
 from uuid import UUID
 
+from django.db import transaction
 from django.db.models import Max
 
+from game.events import GameEvent
 from game.models import GameSession, GameTurn
+from game.quests import process_game_events
 
 
 def get_existing_turn(
@@ -36,6 +39,7 @@ def get_existing_turn(
     return existing
 
 
+@transaction.atomic
 def create_turn(
     *,
     session: GameSession,
@@ -44,6 +48,7 @@ def create_turn(
     narration: str,
     mechanical_result: dict,
     original_message: str = "",
+    events: list[GameEvent] | None = None,
 ) -> GameTurn:
     last_turn_number = (
         GameTurn.objects.filter(session=session).aggregate(last=Max("number"))["last"]
@@ -51,6 +56,19 @@ def create_turn(
     )
 
     next_turn_number = max(session.turn_number, last_turn_number) + 1
+
+    events = []
+
+    quest_updates = process_game_events(
+        session=session,
+        events=events,
+    )
+
+    mechanical_result = {
+        **mechanical_result,
+        "events": [event.model_dump(mode="json") for event in events],
+        "quest_updates": quest_updates,
+    }
 
     turn = GameTurn.objects.create(
         session=session,

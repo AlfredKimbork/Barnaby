@@ -9,6 +9,7 @@ from rest_framework.test import APIClient
 
 from characters.models import Character
 from game.checks import resolve_roll_mode, resolve_skill_check, roll_d20
+from game.events import EventCondition, GameEvent
 from game.interactions import calculate_interaction_dc
 from game.knowledge import get_permitted_knowledge
 from game.mechanics import resolve_attack
@@ -1165,3 +1166,60 @@ class DiceRollTest(SimpleTestCase):
     def test_invalid_roll_mode(self):
         with self.assertRaises(ValueError):
             roll_d20("invalid")  # pyright: ignore
+
+
+class GameEventTest(SimpleTestCase):
+    def test_matching_event(self):
+        condition = EventCondition(
+            type="object_discovered",
+            target="notice_board",
+        )
+
+        event = GameEvent(
+            type="object_discovered",
+            target="notice_board",
+            location="The player has discovered the notice board.",
+        )
+
+        self.assertTrue(condition.matched(event))
+
+    def test_wrong_target(self):
+        condition = EventCondition(
+            type="object_discovered",
+            target="notice_board",
+        )
+
+        event = GameEvent(
+            type="object_discovered",
+            target="fireplace",
+        )
+
+        self.assertFalse(condition.matched(event))
+
+    def test_wrong_event_type(self):
+        condition = EventCondition(
+            type="object_discovered",
+            target="locked_storage",
+        )
+
+        event = GameEvent(
+            type="object_unlocked",
+            target="locked_storage",
+        )
+
+        self.assertFalse(condition.matched(event))
+
+    def test_wrong_location(self):
+        condition = EventCondition(
+            type="object_discovered",
+            target="notice_board",
+            location="lanterns_rest",
+        )
+
+        event = GameEvent(
+            type="object_discovered",
+            target="notice_board",
+            location="hollowmere_sqaure",
+        )
+
+        self.assertFalse(condition.matched(event))

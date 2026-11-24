@@ -150,6 +150,13 @@ class NPCMemory(models.Model):
         ordering = ("-created_at",)
 
 
+class QuestStatus(models.TextChoices):
+    HIDDEN = "hidden", "Hidden"  #   pyright: ignore
+    ACTIVE = "active", "Active"  #   pyright: ignore
+    COMPLETED = "completed", "Completed"  #   pyright: ignore
+    FAILED = "failed", "Failed"  #   pyright: ignore
+
+
 class QuestState(models.Model):
     objects = models.Manager()
     session = models.ForeignKey(
@@ -161,8 +168,18 @@ class QuestState(models.Model):
         Quest,
         on_delete=models.PROTECT,
     )
-    status = models.CharField(max_length=20, default="not_started")
-    completed_objectives = models.JSONField(default=list)
+    status = models.CharField(
+        max_length=20,
+        choices=QuestStatus.choices,
+        default=QuestStatus.HIDDEN,
+    )
+    completed_objectives = models.JSONField(
+        default=list,
+    )
+    matched_events = models.JSONField(
+        default=list,
+        blank=True,
+    )
 
     class Meta:
         constraints = (

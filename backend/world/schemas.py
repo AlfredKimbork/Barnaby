@@ -1,6 +1,8 @@
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+
+from game.events import EventCondition
 
 
 class Schema(BaseModel):
@@ -85,11 +87,63 @@ class NPCSchema(Schema):
     dialogue_examples: dict[str, str] = Field(default_factory=dict)
 
 
+class QuestObjectiveSchema(Schema):
+    id: str
+    description: str
+
+    required: bool = True
+    hidden: bool = False
+
+    prerequisites: list[str] = Field(default_factory=list)
+
+    conditions: list[dict[str, Any]] = Field(default_factory=list)
+
+
 class QuestSchema(Schema):
     id: str
     title: str
     description: str = ""
-    objectives: list[dict[str, Any]] = Field(default_factory=list)
+
+    activation: list[EventCondition] = Field(default_factory=list)
+
+    objectives: list[QuestObjectiveSchema] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_objectives(self):
+        ids = [objective.id for objective in self.objectives]
+
+        if len(ids) != len(set(ids)):
+            raise ValidationError(f"Duplicate objective IDs found in Quest '{self.id}'")
+
+        graph = {objective.id: objective.prerequisites for objective in self.objectives}
+
+        visited = set()
+        visiting = set()
+
+        def visit(objective_id: str):
+            if objective_id not in graph:
+                raise ValidationError(
+                    f"Objective '{objective_id}' not found in Quest '{self.id}'"
+                )
+            if objective_id in visiting:
+                raise ValidationError(
+                    f"Cycle detected in prerequisites of Quest '{self.id}'"
+                )
+            if objective_id in visited:
+                return
+
+            visiting.add(objective_id)
+
+            for prerequisite in graph[objective_id]:
+                visit(prerequisite)
+
+            visiting.remove(objective_id)
+            visited.add(objective_id)
+
+        for objective_id in ids:
+            visit(objective_id)
+
+        return self
 
 
 class ItemSchema(Schema):
