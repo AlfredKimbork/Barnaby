@@ -1,4 +1,3 @@
-import random
 from dataclasses import dataclass
 
 from game.checks import roll_d20
