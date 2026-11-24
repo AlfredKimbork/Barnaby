@@ -44,10 +44,6 @@ def create_game_session(
     # each session gets it's own player state
     PlayerState.objects.create(
         session=session,
-        hp=character.hp,
-        max_hp=character.max_hp,
-        gold=character.gold,
-        inventory=deepcopy(character.inventory),
     )
 
     # copy the NPC's starting state into this session

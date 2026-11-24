@@ -78,9 +78,9 @@ class PlayerState(models.Model):
         related_name="player_state",
     )
 
-    hp = models.PositiveIntegerField()
-    max_hp = models.PositiveIntegerField()
-    gold = models.PositiveIntegerField()
+    hp = models.PositiveIntegerField(default=10)  # pyright: ignore
+    max_hp = models.PositiveIntegerField(default=10)  # pyright: ignore
+    gold = models.PositiveIntegerField(default=0)  # pyright: ignore
     inventory = models.JSONField(default=list, blank=True)
 
     def take_damage(self, amount: int) -> None:

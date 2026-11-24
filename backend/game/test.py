@@ -3,11 +3,12 @@ from uuid import uuid4
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
 from rest_framework.test import APIClient
 
 from characters.models import Character
+from game.checks import resolve_roll_mode, resolve_skill_check, roll_d20
 from game.interactions import calculate_interaction_dc
 from game.knowledge import get_permitted_knowledge
 from game.mechanics import resolve_attack
@@ -21,6 +22,7 @@ from .services import create_game_session
 User = get_user_model()
 
 
+@patch.dict("os.environ", {"AI_PROVIDER": "mock"})
 class GameSessionTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(
@@ -68,9 +70,6 @@ class GameSessionTests(TestCase):
         self.character = Character.objects.create(
             owner=self.user,
             name="Aric",
-            hp=20,
-            max_hp=20,
-            gold=10,
         )
 
         self.client = APIClient()
@@ -93,13 +92,15 @@ class GameSessionTests(TestCase):
         self.assertEqual(session.flags, {"quest_started": False})  # pyright: ignore
 
         player = PlayerState.objects.get(session=session)
-        self.assertEqual(player.hp, 20)
-        self.assertEqual(player.gold, 10)
+        self.assertEqual(player.hp, 10)  # pyright: ignore
+        self.assertEqual(player.max_hp, 10)  # pyright: ignore
+        self.assertEqual(player.gold, 0)  # pyright: ignore
+        self.assertEqual(player.inventory, [])  # pyright: ignore
 
-        self.assertEqual(
+        self.assertEqual(  # pyright: ignore
             NPCState.objects.filter(session=session, npc=self.npc).count(), 1
         )
-        self.assertEqual(
+        self.assertEqual(  # pyright: ignore
             QuestState.objects.filter(session=session, quest=self.quest).count(), 1
         )
 
@@ -129,8 +130,8 @@ class GameSessionTests(TestCase):
             npc=self.npc,
         )
 
-        self.assertEqual(first_npc.hp, 5)
-        self.assertEqual(second_npc.hp, 18)  # initial state from NPC data
+        self.assertEqual(first_npc.hp, 5)  # pyright: ignore
+        self.assertEqual(second_npc.hp, 18)  # pyright: ignore
 
     def test_cannot_use_another_users_character(self):
         other_user = User.objects.create_user(
@@ -239,8 +240,8 @@ class AttackMechanicsTest(TestCase):
         )
 
         self.assertTrue(result.hit)
-        self.assertEqual(result.total, 17)
-        self.assertEqual(result.damage, 7)
+        self.assertEqual(result.total, 17)  # pyright: ignore
+        self.assertEqual(result.damage, 7)  # pyright: ignore
 
     @patch("game.mechanics.roll_d20", return_value=1)
     def test_natural_one_always_miss(self, mock_roll):
@@ -251,7 +252,7 @@ class AttackMechanicsTest(TestCase):
         )
 
         self.assertFalse(result.hit)
-        self.assertEqual(result.damage, 0)
+        self.assertEqual(result.damage, 0)  # pyright: ignore
 
 
 class AttackActionTest(TestCase):
@@ -317,10 +318,6 @@ class AttackActionTest(TestCase):
         self.character = Character.objects.create(
             owner=self.user,
             name="Aric",
-            hp=20,
-            max_hp=20,
-            gold=10,
-            inventory=["rusty_sword"],
         )
 
         self.session = create_game_session(
@@ -328,6 +325,10 @@ class AttackActionTest(TestCase):
             character=self.character,  # pyright: ignore
             campaign=self.campaign,  # pyright: ignore
         )
+
+        player = PlayerState.objects.get(session=self.session)
+        player.inventory = ["rusty_sword"]
+        player.save(update_fields=["inventory"])
 
     def attack(self, *, action_id=None, target="garrick"):
         return self.client.post(
@@ -354,8 +355,8 @@ class AttackActionTest(TestCase):
         )
 
         self.assertEqual(self.session.turn_number, 1)  # pyright: ignore
-        self.assertEqual(npc_state.hp, 13)
-        self.assertEqual(GameTurn.objects.filter(session=self.session).count(), 1)
+        self.assertEqual(npc_state.hp, 13)  # pyright: ignore
+        self.assertEqual(GameTurn.objects.filter(session=self.session).count(), 1)  # pyright: ignore
 
     @patch("game.mechanics.roll_d20", return_value=15)
     def test_duplicate_action_does_not_deal_damage_twice(self, mock_roll):
@@ -373,8 +374,8 @@ class AttackActionTest(TestCase):
             npc=self.npc,
         )
 
-        self.assertEqual(npc_state.hp, 13)
-        self.assertEqual(GameTurn.objects.filter(session=self.session).count(), 1)
+        self.assertEqual(npc_state.hp, 13)  # pyright: ignore
+        self.assertEqual(GameTurn.objects.filter(session=self.session).count(), 1)  # pyright: ignore
 
         self.session.refresh_from_db()  # pyright: ignore
         self.assertEqual(self.session.turn_number, 1)  # pyright: ignore
@@ -395,8 +396,8 @@ class AttackActionTest(TestCase):
         npc_state.refresh_from_db()
 
         self.assertEqual(self.session.turn_number, 0)  # pyright: ignore
-        self.assertEqual(npc_state.hp, 18)
-        self.assertEqual(GameTurn.objects.filter(session=self.session).count(), 0)
+        self.assertEqual(npc_state.hp, 18)  # pyright: ignore
+        self.assertEqual(GameTurn.objects.filter(session=self.session).count(), 0)  # pyright: ignore
 
     def test_cannot_attack_without_weapon(self):
         player = PlayerState.objects.get(session=self.session)
@@ -410,8 +411,8 @@ class AttackActionTest(TestCase):
         npc_state = NPCState.objects.get(session=self.session, npc=self.npc)
 
         self.assertEqual(self.session.turn_number, 0)  # pyright: ignore
-        self.assertEqual(npc_state.hp, 18)
-        self.assertEqual(GameTurn.objects.filter(session=self.session).count(), 0)
+        self.assertEqual(npc_state.hp, 18)  # pyright: ignore
+        self.assertEqual(GameTurn.objects.filter(session=self.session).count(), 0)  # pyright: ignore
 
     def test_cannot_attack_another_users_session(self):
         other_character = Character.objects.create(
@@ -436,7 +437,7 @@ class AttackActionTest(TestCase):
         )
 
         self.assertEqual(response.status_code, 404)  # pyright: ignore
-        self.assertEqual(GameTurn.objects.filter(session=other_session).count(), 0)
+        self.assertEqual(GameTurn.objects.filter(session=other_session).count(), 0)  # pyright: ignore
 
 
 class MovementActionTest(TestCase):
@@ -481,9 +482,6 @@ class MovementActionTest(TestCase):
         self.character = Character.objects.create(
             owner=self.user,
             name="Aric",
-            hp=20,
-            max_hp=20,
-            gold=10,
         )
 
         self.session = create_game_session(
@@ -510,7 +508,7 @@ class MovementActionTest(TestCase):
         self.session.refresh_from_db()  # pyright: ignore
         self.assertEqual(self.session.current_location, self.square)  #  pyright: ignore
         self.assertEqual(self.session.turn_number, 1)  # pyright: ignore
-        self.assertEqual(GameTurn.objects.filter(session=self.session).count(), 1)
+        self.assertEqual(GameTurn.objects.filter(session=self.session).count(), 1)  # pyright: ignore
 
     def test_cannot_move_to_unconnected_location(self):
         action_id = uuid4()
@@ -529,7 +527,7 @@ class MovementActionTest(TestCase):
         self.session.refresh_from_db()  # pyright: ignore
         self.assertEqual(self.session.current_location, self.tavern)  # pyright: ignore
         self.assertEqual(self.session.turn_number, 0)  # pyright: ignore
-        self.assertEqual(GameTurn.objects.filter(session=self.session).count(), 0)
+        self.assertEqual(GameTurn.objects.filter(session=self.session).count(), 0)  # pyright: ignore
 
     def test_duplicate_move_action_does_not_increment_turn(self):
         action_id = uuid4()
@@ -557,7 +555,7 @@ class MovementActionTest(TestCase):
         self.session.refresh_from_db()  # pyright: ignore
         self.assertEqual(self.session.current_location, self.square)  # pyright: ignore
         self.assertEqual(self.session.turn_number, 1)  # pyright: ignore
-        self.assertEqual(GameTurn.objects.filter(session=self.session).count(), 1)
+        self.assertEqual(GameTurn.objects.filter(session=self.session).count(), 1)  # pyright: ignore
 
 
 class InspectActionTest(TestCase):
@@ -623,10 +621,6 @@ class InspectActionTest(TestCase):
         self.character = Character.objects.create(
             owner=self.user,
             name="Aric",
-            hp=20,
-            max_hp=20,
-            gold=10,
-            inventory=["rusty_sword"],
         )
 
         self.session = create_game_session(
@@ -652,8 +646,8 @@ class InspectActionTest(TestCase):
 
         result = response.data["mechanical_result"]  # pyright: ignore
 
-        self.assertEqual(result["type"], "inspect")
-        self.assertEqual(result["location"]["slug"], "tavern")
+        self.assertEqual(result["type"], "inspect")  # pyright: ignore
+        self.assertEqual(result["location"]["slug"], "tavern")  # pyright: ignore
 
     def test_inspect_returns_visible_npcs(self):
         response = self.inspect()
@@ -662,8 +656,8 @@ class InspectActionTest(TestCase):
 
         npcs = response.data["mechanical_result"]["npcs"]  # pyright: ignore
 
-        self.assertEqual(len(npcs), 1)
-        self.assertEqual(npcs[0]["slug"], "garrick")
+        self.assertEqual(len(npcs), 1)  # pyright: ignore
+        self.assertEqual(npcs[0]["slug"], "garrick")  # pyright: ignore
 
     def test_inspect_creates_turn(self):
         response = self.inspect()
@@ -673,7 +667,7 @@ class InspectActionTest(TestCase):
         self.session.refresh_from_db()  # pyright: ignore
 
         self.assertEqual(self.session.turn_number, 1)  # pyright: ignore
-        self.assertEqual(GameTurn.objects.filter(session=self.session).count(), 1)
+        self.assertEqual(GameTurn.objects.filter(session=self.session).count(), 1)  # pyright: ignore
 
     def test_duplicate_inspect_action_does_not_increment_turn(self):
         action_id = uuid4()
@@ -684,7 +678,7 @@ class InspectActionTest(TestCase):
         self.session.refresh_from_db()  # pyright: ignore
 
         self.assertEqual(self.session.turn_number, 1)  # pyright: ignore
-        self.assertEqual(GameTurn.objects.filter(session=self.session).count(), 1)
+        self.assertEqual(GameTurn.objects.filter(session=self.session).count(), 1)  # pyright: ignore
 
 
 class TalkActionTest(TestCase):
@@ -750,10 +744,6 @@ class TalkActionTest(TestCase):
         self.character = Character.objects.create(
             owner=self.user,
             name="Aric",
-            hp=20,
-            max_hp=20,
-            gold=10,
-            inventory=["rusty_sword"],
         )
 
         self.session = create_game_session(
@@ -783,11 +773,11 @@ class TalkActionTest(TestCase):
         self.session.refresh_from_db()  # pyright: ignore
 
         self.assertEqual(self.session.turn_number, 1)  # pyright: ignore
-        self.assertEqual(GameTurn.objects.filter(session=self.session).count(), 1)
+        self.assertEqual(GameTurn.objects.filter(session=self.session).count(), 1)  # pyright: ignore
 
         result = response.data["mechanical_result"]  # pyright: ignore
 
-        self.assertEqual(result["type"], "talk")
+        self.assertEqual(result["type"], "talk")  # pyright: ignore
         self.assertIn("message", result)
 
     def test_duplicate_talk_action_does_not_increment_turn(self):
@@ -799,7 +789,7 @@ class TalkActionTest(TestCase):
         self.session.refresh_from_db()  # pyright: ignore
 
         self.assertEqual(self.session.turn_number, 1)  # pyright: ignore
-        self.assertEqual(GameTurn.objects.filter(session=self.session).count(), 1)
+        self.assertEqual(GameTurn.objects.filter(session=self.session).count(), 1)  # pyright: ignore
 
     def test_cannot_talk_to_npc_in_another_location(self):
         npc_state = NPCState.objects.get(
@@ -815,7 +805,7 @@ class TalkActionTest(TestCase):
 
         self.session.refresh_from_db()  # pyright: ignore
         self.assertEqual(self.session.turn_number, 0)  # pyright: ignore
-        self.assertEqual(GameTurn.objects.filter(session=self.session).count(), 0)
+        self.assertEqual(GameTurn.objects.filter(session=self.session).count(), 0)  # pyright: ignore
 
     def test_cannot_talk_to_another_users_session(self):
         other_character = Character.objects.create(
@@ -840,13 +830,13 @@ class TalkActionTest(TestCase):
         )
 
         self.assertEqual(response.status_code, 404)  # pyright: ignore
-        self.assertEqual(GameTurn.objects.filter(session=other_session).count(), 0)
+        self.assertEqual(GameTurn.objects.filter(session=other_session).count(), 0)  # pyright: ignore
 
     def test_talk_without_message_returns_error(self):
         response = self.talk(message="")
 
         self.assertEqual(response.status_code, 400)  # pyright: ignore
-        self.assertEqual(GameTurn.objects.filter(session=self.session).count(), 0)
+        self.assertEqual(GameTurn.objects.filter(session=self.session).count(), 0)  # pyright: ignore
 
 
 class NPCKnowledgeTest(TestCase):
@@ -889,9 +879,6 @@ class NPCKnowledgeTest(TestCase):
         self.character = Character.objects.create(
             owner=self.user,
             name="Aric",
-            hp=20,
-            max_hp=20,
-            gold=10,
         )
 
         self.client = APIClient()
@@ -927,7 +914,7 @@ class NPCKnowledgeTest(TestCase):
         npc_state.trust = 0
         npc_state.save(update_fields=["trust"])
 
-        self.assertEqual(
+        self.assertEqual(  # pyright: ignore
             get_permitted_knowledge(npc_state.session, npc_state),
             ["The village is quiet."],
         )
@@ -935,7 +922,7 @@ class NPCKnowledgeTest(TestCase):
         npc_state.trust = 5
         npc_state.save(update_fields=["trust"])
 
-        self.assertEqual(
+        self.assertEqual(  # pyright: ignore
             get_permitted_knowledge(npc_state.session, npc_state),
             [
                 "The village is quiet.",
@@ -956,8 +943,8 @@ class NPCKnowledgeTest(TestCase):
         apply_relationship_event(npc_state=npc_state, event="attacked_npc")  # pyright: ignore
         npc_state.refresh_from_db()  # pyright: ignore
 
-        self.assertEqual(npc_state.trust, -5)
-        self.assertEqual(npc_state.hostility, 5)
+        self.assertEqual(npc_state.trust, -5)  # pyright: ignore
+        self.assertEqual(npc_state.hostility, 5)  # pyright: ignore
 
     def test_relationship_values_are_clamped(self):
         npc_state = NPCState.objects.get(
@@ -972,8 +959,8 @@ class NPCKnowledgeTest(TestCase):
         apply_relationship_event(npc_state=npc_state, event="attacked_npc")  # pyright: ignore
         npc_state.refresh_from_db()  # pyright: ignore
 
-        self.assertEqual(npc_state.trust, -100)
-        self.assertEqual(npc_state.hostility, 100)
+        self.assertEqual(npc_state.trust, -100)  # pyright: ignore
+        self.assertEqual(npc_state.hostility, 100)  # pyright: ignore
 
     def test_personality_affect_difficulty(self):
         npc_state = NPCState.objects.get(
@@ -988,7 +975,7 @@ class NPCKnowledgeTest(TestCase):
         }
         dc = calculate_interaction_dc(npc_state=npc_state, intent="persuade")
 
-        self.assertEqual(dc, 17)
+        self.assertEqual(dc, 17)  # pyright: ignore
 
     def test_trust_reduces_persuasion_difficulty(self):
         npc_state = NPCState.objects.get(
@@ -1027,3 +1014,154 @@ class NPCKnowledgeTest(TestCase):
         )
 
         self.assertGreater(hostile_dc, neutral_dc)
+
+
+class InteractionMechanicsTest(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="testplayer",
+            password="testpassword",
+        )
+
+        self.campaign = Campaign.objects.create(
+            slug="test_campaign",
+            title="Test Campaign",
+            data={
+                "starting_state": {
+                    "location": "tavern",
+                    "flags": {"quest_started": False},
+                },
+            },
+        )
+
+        self.location = Location.objects.create(
+            campaign=self.campaign, slug="tavern", name="The Tavern"
+        )
+
+        self.npc = NPC.objects.create(
+            campaign=self.campaign,
+            slug="garrick",
+            name="Garrick",
+            starting_location=self.location,
+            data={
+                "initial_state": {
+                    "hp": 18,
+                    "max_hp": 18,
+                    "alive": True,
+                    "trust": 0,
+                    "hostility": 0,
+                },
+                "personality": {
+                    "social_resistance": {
+                        "persuade": 5,
+                        "intimidate": 3,
+                        "deceive": 4,
+                        "compliment": 2,
+                    }
+                },
+            },
+        )
+
+        self.character = Character.objects.create(
+            owner=self.user,
+            name="Aric",
+        )
+
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.user)
+
+        self.session = create_game_session(
+            owner=self.user,  # pyright: ignore
+            character=self.character,  # pyright: ignore
+            campaign=self.campaign,  # pyright: ignore
+        )
+
+    def test_attribute_modifier(self):
+        self.character.charisma = 16
+
+        self.assertEqual(  # pyright: ignore
+            self.character.attribute_modifier("charisma"),
+            3,
+        )
+
+    def test_proficient_skill(self):
+        self.character.charisma = 16
+        self.character.level = 1
+        self.character.proficient_skills = ["persuasion"]
+
+        self.assertEqual(  # pyright: ignore
+            self.character.skill_modifier("persuasion"),
+            5,
+        )
+
+    def test_non_proficient_skill(self):
+        self.character.charisma = 16
+        self.character.proficient_skills = []
+
+        self.assertEqual(  # pyright: ignore
+            self.character.skill_modifier("persuasion"),
+            3,
+        )
+
+    def test_strength_based_intimidation(self):
+        self.character.strength = 18
+        self.character.level = 1
+        self.character.proficient_skills = ["intimidation"]
+
+        self.assertEqual(  # pyright: ignore
+            self.character.skill_modifier(
+                "intimidation",
+                attribute="strength",
+            ),
+            6,
+        )
+
+    @patch("game.checks.randint", return_value=12)
+    def test_successful_skill_check(self, mock_roll):
+        self.character.charisma = 16
+        self.character.level = 1
+        self.character.proficient_skills = ["persuasion"]
+
+        result = resolve_skill_check(
+            character=self.character,
+            skill="persuasion",
+            difficulty=15,
+        )
+
+        self.assertEqual(result.roll, 12)  # pyright: ignore
+        self.assertEqual(result.modifier, 5)  # pyright: ignore
+        self.assertEqual(result.total, 17)  # pyright: ignore
+        self.assertTrue(result.success)
+
+
+class DiceRollTest(SimpleTestCase):
+    @patch("game.checks.randint", return_value=12)
+    def test_normal_roll(self, mock_roll):
+        roll, rolls = roll_d20("normal")
+
+        self.assertEqual(roll, 12)  # pyright: ignore
+        self.assertEqual(rolls, (12,))  # pyright: ignore
+        self.assertEqual(mock_roll.call_count, 1)  # pyright: ignore
+
+    @patch("game.checks.randint", side_effect=[4, 17])
+    def test_advantage_roll(self, mock_roll):
+        roll, rolls = roll_d20("advantage")
+
+        self.assertEqual(roll, 17)  # pyright: ignore
+        self.assertEqual(rolls, (4, 17))  # pyright: ignore
+
+    @patch("game.checks.randint", side_effect=[4, 17])
+    def test_disadvantage_roll(self, mock_roll):
+        roll, rolls = roll_d20("disadvantage")
+
+        self.assertEqual(roll, 4)  # pyright: ignore
+        self.assertEqual(rolls, (4, 17))  # pyright: ignore
+
+    def test_advantage_and_disadvantage_cancel(self):
+        mode = resolve_roll_mode(advantage=True, disadvantage=True)
+
+        self.assertEqual(mode, "normal")  # pyright: ignore
+
+    def test_invalid_roll_mode(self):
+        with self.assertRaises(ValueError):
+            roll_d20("invalid")  # pyright: ignore

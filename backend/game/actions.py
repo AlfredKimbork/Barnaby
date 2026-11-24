@@ -1,3 +1,4 @@
+from dataclasses import asdict
 from uuid import UUID
 
 from django.core.exceptions import ValidationError
@@ -347,9 +348,9 @@ def process_talk(
     narration = f"You speak to {npc_state.npc.name}."
 
     interaction = resolve_interaction(
-        npc_state=npc_state,  # pyright: ignore
+        character=session.character,  # pyright: ignore
+        npc_state=npc_state,
         intent=intent,
-        modifier=0,
     )
 
     return create_turn(
@@ -362,13 +363,7 @@ def process_talk(
             "target": target_slug,
             "message": message,
             "npc_name": npc_state.npc.name,
-            "interaction": {
-                "intent": interaction.intent,
-                "success": interaction.success,
-                "roll": interaction.roll,
-                "difficulty": interaction.difficulty,
-                "relationship_event": interaction.relationship_event,
-            },
+            "interaction": asdict(interaction),
             "npc_trust": npc_state.trust,
             "npc_hostility": npc_state.hostility,
         },

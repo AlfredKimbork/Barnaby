@@ -1,7 +1,7 @@
 from dataclasses import dataclass
-from random import randint
-from typing import Literal
 
+from characters.models import Character
+from game.checks import RollMode, resolve_skill_check
 from game.models import NPCState
 from game.relationships import apply_relationship_event
 
@@ -11,8 +11,12 @@ class InteractionResult:
     intent: str
     success: bool
     roll: int | None
+    modifier: int
+    total: int | None
     difficulty: int | None
     relationship_event: str | None
+    rolls: tuple[int, ...]
+    roll_mode: RollMode
 
 
 BASE_DIFFICULTIES = {
@@ -20,6 +24,13 @@ BASE_DIFFICULTIES = {
     "intimidate": 14,
     "decieve": 15,
     "compliment": 10,
+}
+
+INTERACTION_SKILLS = {
+    "persuade": "persuasion",
+    "intimidate": "intimidation",
+    "deceive": "deception",
+    "compliment": "persuasion",
 }
 
 
@@ -55,25 +66,43 @@ def calculate_interaction_dc(
 
 def resolve_interaction(
     *,
+    character: Character,
     npc_state: NPCState,
     intent: str,
     modifier: int = 0,
+    context_modifier: int = 0,
+    advantage: bool = False,
+    disadvantage: bool = False,
 ) -> InteractionResult:
     if intent not in BASE_DIFFICULTIES and intent != "normal":
         raise ValueError(f"Invalid intent: {intent}")
 
     difficulty = (
-        calculate_interaction_dc(npc_state=npc_state, intent=intent)
+        calculate_interaction_dc(
+            npc_state=npc_state,
+            intent=intent,
+            context_modifier=context_modifier,
+        )
         if intent != "normal"
         else None
     )
 
     roll = None
     success = True
+    check = None
 
     if difficulty is not None:
-        roll = randint(1, 20) + modifier
-        success = roll >= difficulty
+        check = resolve_skill_check(
+            character=character,
+            skill=INTERACTION_SKILLS[intent],
+            difficulty=difficulty,
+            bonus=modifier,
+            advantage=advantage,
+            disadvantage=disadvantage,
+        )
+
+        roll = check.roll
+        success = check.success
 
     relationship_event = None
 
@@ -97,6 +126,10 @@ def resolve_interaction(
         intent=intent,
         success=success,
         roll=roll,
+        modifier=check.modifier if check else 0,
+        total=check.total if check else None,
         difficulty=difficulty,
         relationship_event=relationship_event,
+        rolls=check.rolls if check else (),
+        roll_mode=check.roll_mode if check else "normal",
     )

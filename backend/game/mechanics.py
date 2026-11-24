@@ -1,6 +1,8 @@
 import random
 from dataclasses import dataclass
 
+from game.checks import roll_d20
+
 
 @dataclass(frozen=True)
 class AttackResult:
@@ -12,17 +14,13 @@ class AttackResult:
     damage: int
 
 
-def roll_d20() -> int:
-    return random.randint(1, 20)
-
-
 def resolve_attack(
     *,
     strength: int,
     defense: int,
     weapon_damage: int,
 ) -> AttackResult:
-    roll = roll_d20()
+    roll, _rolls = roll_d20()
     modifier = (strength - 10) // 2
     total = roll + modifier
 
