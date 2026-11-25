@@ -6,6 +6,7 @@ from django.core.exceptions import ValidationError
 from rest_framework.exceptions import APIException
 
 from game.actions import process_attack, process_inspect, process_movement, process_talk
+from game.general_actions import process_roleplay, process_skill_check
 from game.interactables import process_interactable
 from game.knowledge import finalize_dialogue
 from game.memory import remember
@@ -91,6 +92,22 @@ def play_turn(
                 target_slug=action.target_slug,  # pyright: ignore
                 operation=action.operation,  # pyright: ignore
                 item_slug=action.item_slug,  # pyright: ignore
+            )
+        case "skill_check":
+            turn = process_skill_check(
+                session=session,  # pyright: ignore
+                action_id=action_id,  # pyright: ignore
+                target_slug=action.target_slug,  # pyright: ignore
+                approach_slug=action.approach,  # pyright: ignore
+                intent=action.intent,  # pyright: ignore
+                original_message=message,  # pyright: ignore
+            )
+        case "roleplay":
+            turn = process_roleplay(
+                session=session,  # pyright: ignore
+                action_id=action_id,  # pyright: ignore
+                description=action.description,  # pyright:ignore
+                original_message=message,  # pyright: ignore
             )
 
         case _:

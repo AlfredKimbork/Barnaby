@@ -12,13 +12,21 @@ from rest_framework.test import APIClient
 from characters.models import Character
 from game.checks import resolve_roll_mode, resolve_skill_check, roll_d20
 from game.events import EventCondition, GameEvent
+from game.general_actions import process_skill_check
 from game.interactions import calculate_interaction_dc
 from game.knowledge import (
     get_permitted_knowledge,
     record_knowledge_disclosures,
 )
 from game.mechanics import resolve_attack
-from game.models import GameTurn, KnowledgeDiscovery, NPCState, PlayerState, QuestState
+from game.models import (
+    ChallengeState,
+    GameTurn,
+    KnowledgeDiscovery,
+    NPCState,
+    PlayerState,
+    QuestState,
+)
 from game.progression import get_level
 from game.relationships import apply_relationship_event
 from game.rewards import grant_experience, grant_quest_rewards
@@ -1097,7 +1105,33 @@ class NPCKnowledgeTest(TestCase):
         )
 
         self.location = Location.objects.create(
-            campaign=self.campaign, slug="tavern", name="The Tavern"
+            campaign=self.campaign,
+            slug="tavern",
+            name="The Tavern",
+            data={
+                "challenges": [
+                    {
+                        "id": "muddy_footprints",
+                        "description": "Muddy footprints lead away from the tavern.",
+                        "approaches": [
+                            {
+                                "id": "track",
+                                "description": "Determine where the footprints lead.",
+                                "skill": "survival",
+                                "difficulty": 12,
+                                "repeatable": False,
+                                "success": {
+                                    "description": "The footprints lead north.",
+                                    "flags": {"mercenary_tracks_found": True},
+                                },
+                                "failure": {
+                                    "description": "The footprints are too disturbed to follow.",
+                                },
+                            }
+                        ],
+                    }
+                ],
+            },
         )
 
         self.npc = NPC.objects.create(
@@ -1253,6 +1287,90 @@ class NPCKnowledgeTest(TestCase):
         )
 
         self.assertGreater(hostile_dc, neutral_dc)
+
+    @patch("game.checks.randint", return_value=20)
+    def test_successful_challenge(self, mock_roll):
+        turn = process_skill_check(
+            session=self.session,  # pyright:ignore
+            action_id=uuid4(),  # pyright:ignore
+            target_slug="muddy_footprints",  # pyright:ignore
+            approach_slug="track",  # pyright:ignore
+            intent="Follow the tracks.",  # pyright:ignore
+        )
+
+        self.session.refresh_from_db()  # pyright:ignore
+
+        self.assertTrue(
+            turn.mechanical_result["success"]  # pyright:ignore
+        )
+
+        self.assertTrue(
+            self.session.flags["mercenary_tracks_found"]  # pyright:ignore
+        )
+
+        state = ChallengeState.objects.get(
+            session=self.session,
+            challenge_slug="muddy_footprints",
+            approach_slug="track",
+        )
+
+        self.assertEqual(state.attempts, 1)  # pyright:ignore
+        self.assertEqual(state.successes, 1)  # pyright:ignore
+        self.assertEqual(state.failures, 0)  # pyright:ignore
+
+    @patch("game.checks.randint", return_value=1)
+    def test_failed_challenge(self, mock_roll):
+        turn = process_skill_check(
+            session=self.session,  # pyright:ignore
+            action_id=uuid4(),  # pyright:ignore
+            target_slug="muddy_footprints",  # pyright:ignore
+            approach_slug="track",  # pyright:ignore
+            intent="Follow the tracks.",  # pyright:ignore
+        )
+
+        self.session.refresh_from_db()  # pyright:ignore
+
+        self.assertFalse(
+            turn.mechanical_result["success"]  # pyright:ignore
+        )
+
+        self.assertNotIn(
+            "mercenary_tracks_found",
+            self.session.flags,  # pyright:ignore
+        )
+
+        state = ChallengeState.objects.get(
+            session=self.session,
+            challenge_slug="muddy_footprints",
+            approach_slug="track",
+        )
+
+        self.assertEqual(state.failures, 1)  # pyright:ignore
+
+    def test_invalid_challenge(self):
+        turn = process_skill_check(
+            session=self.session,  # pyright:ignore
+            action_id=uuid4(),  # pyright:ignore
+            target_slug="nonexistent_tower",  # pyright:ignore
+            approach_slug="climb",  # pyright:ignore
+            intent="Climb the tower.",  # pyright:ignore
+        )
+
+        self.assertEqual(  # pyright:ignore
+            turn.mechanical_result["status"],  # pyright:ignore
+            "rejected",
+        )
+
+        self.assertIsNone(
+            turn.mechanical_result["check"]  # pyright:ignore
+        )
+
+        self.assertFalse(
+            ChallengeState.objects.filter(
+                session=self.session,
+                challenge_slug="nonexistent_tower",
+            ).exists()
+        )
 
 
 class InteractionMechanicsTest(TestCase):

@@ -11,6 +11,8 @@ EventType = Literal[
     "npc_killed",
     "knowledge_discovered",
     "flag_changed",
+    "challange_succeeded",
+    "challenge_failed",
 ]
 
 
@@ -20,12 +22,13 @@ class GameEvent(BaseModel):
     type: EventType
 
     target: str | None = None
+    approach: str | None = None
     location: str | None = None
     item: str | None = None
     npc: str | None = None
     knowledge: str | None = None
     flag: str | None = None
-    value: str | None = None
+    value: str | bool | int | None = None
 
 
 class EventCondition(GameEvent):

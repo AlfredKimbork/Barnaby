@@ -2,6 +2,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from characters.skills import SKILL_ATTRIBUTES
 from game.events import EventCondition
 
 
@@ -31,6 +32,69 @@ class InteractableSchema(Schema):
     contents: list[str] = Field(default_factory=list)
 
 
+class ChallengeOutcomeShema(Schema):
+    description: str
+
+    flags: dict[str, bool | int | str] = Field(default_factory=dict)
+
+    damage: int = Field(default=0, ge=0)
+
+
+class ChallengeApproachSchema(Schema):
+    id: str
+    description: str
+
+    skill: str | None = None
+
+    difficulty: int | None = Field(
+        default=None,
+        ge=1,
+        le=30,
+    )
+
+    repeatable: bool = False
+
+    success: ChallengeOutcomeShema
+    failure: ChallengeOutcomeShema
+
+    @model_validator(mode="after")
+    def validate_skill_check(self):
+        if self.skill is None:
+            if self.difficulty is not None:
+                raise ValueError("Difficulty requires a skill.")
+
+            return self
+
+        if self.skill not in SKILL_ATTRIBUTES:
+            raise ValueError(f"Unknown skill: {self.skill}")
+
+        if self.difficulty is None:
+            raise ValueError("Skill checks require a difficulty.")
+
+        if self.failure is None:
+            raise ValueError("Skill checks require a failure.")
+
+        return self
+
+
+class ChallengeSchema(Schema):
+    id: str
+    description: str
+
+    approaches: list[ChallengeApproachSchema] = Field(
+        min_length=1,
+    )
+
+    @model_validator(mode="after")
+    def validate_approaches(self):
+        ids = [approach.id for approach in self.approaches]
+
+        if len(ids) != len(set(ids)):
+            raise ValidationError("Duplicate challenge approach IDs.")
+
+        return self
+
+
 class LocationSchema(Schema):
     id: str
     name: str
@@ -40,6 +104,8 @@ class LocationSchema(Schema):
     interactables: list[InteractableSchema] = Field(default_factory=list)
     connections: list[str] = Field(default_factory=list)
     encounters: list[str] = Field(default_factory=list)
+
+    challenges: list[ChallengeSchema] = Field(default_factory=list)
 
 
 class NPCInitialStateSchema(Schema):

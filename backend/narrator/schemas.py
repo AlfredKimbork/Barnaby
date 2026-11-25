@@ -44,11 +44,43 @@ class InteractionAction(BaseModel):
     type: Literal["interact"]
     target_slug: str
     operation: ObjectOperation
+    message: str
     item_slug: str | None = None
 
 
+class SkillCheckAction(BaseModel):
+    type: Literal["skill_check"]
+
+    target_slug: str
+    approach: str
+
+    intent: str = Field(
+        min_length=1,
+        max_length=500,
+    )
+
+    message: str
+
+
+class RoleplayAction(BaseModel):
+    type: Literal["roleplay"]
+
+    description: str = Field(
+        min_length=1,
+        max_length=500,
+    )
+
+    message: str
+
+
 GameAction = Annotated[
-    AttackAction | MoveAction | InspectAction | TalkAction | InteractionAction,
+    AttackAction
+    | MoveAction
+    | InspectAction
+    | TalkAction
+    | InteractionAction
+    | SkillCheckAction
+    | RoleplayAction,
     Field(discriminator="type"),
 ]
 

@@ -39,6 +39,65 @@ locations:
       - id: tavern_rumors
         trigger: "ask_about_disappearances"
         effect: "Garrick shares information he knows."
+    challenges:
+      - id: muddy_footprints
+        description: Muddy footprints leading away from the tavern.
+
+        approaches:
+          - id: track
+            description: Determine where the footprints lead.
+            skill: survival
+            difficulty: 12
+            repeatable: false
+
+            success:
+              description: The footprints lead north.
+              flags:
+                mercenary_tracks_found: true
+
+            failure:
+              description: The footprints are too disturbed to follow.
+
+          - id: examine
+            description: Examine the size and depth of the footprints.
+            skill: investigation
+            difficulty: 10
+            repeatable: false
+
+            success:
+              description: At least three people passed through here.
+
+            failure:
+              description: You cannot determine how many people passed.
+
+          - id: tavern_roof
+            description: The sloping roof of the tavern.
+
+            approaches:
+              - id: climb
+                description: Climb onto the roof.
+                skill: athletics
+                difficulty: 14
+                repeatable: true
+
+                success:
+                  description: You successfully climb onto the roof.
+                  flags:
+                    on_tavern_roof: true
+
+                failure:
+                  description: You lose your grip and slide back down.
+                  damage: 2
+          - id: wooden_bench
+            description: A wooden bench outside the tavern.
+
+            approaches:
+              - id: sit
+                description: Sit down on the bench.
+                repeatable: true
+
+                success:
+                  description: You sit down on the wooden bench.
 
   - id: hollowmere_square
     name: "Hollowmere Village Square"

@@ -1,3 +1,4 @@
+from game.general_actions import get_visible_challenges
 from game.interactables import get_visible_interactables
 from game.knowledge import (
     get_discovered_knowledge,
@@ -35,6 +36,7 @@ def build_interpreter_context(session: GameSession):
             for npc in npcs
         ],
         "inventory": session.player_state.inventory,  # pyright: ignore
+        "available_challenges": get_visible_challenges(session),
     }
 
 

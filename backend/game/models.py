@@ -310,3 +310,44 @@ class KnowledgeDiscovery(models.Model):
 
     def __str__(self):  # pyright:ignore
         return self.knowledge_id
+
+
+class ChallengeState(models.Model):
+    objects = models.Manager()
+
+    session = models.ForeignKey(
+        GameSession,
+        on_delete=models.CASCADE,
+        related_name="challenge_states",
+    )
+
+    location = models.ForeignKey(
+        "world.Location",
+        on_delete=models.PROTECT,
+    )
+
+    challenge_slug = models.SlugField(max_length=150)
+
+    approach_slug = models.SlugField(max_length=150)
+
+    attempts = models.PositiveIntegerField(default=0)  # pyright:ignore
+
+    successes = models.PositiveIntegerField(default=0)  # pyright:ignore
+    failures = models.PositiveIntegerField(default=0)  # pyright:ignore
+
+    class Meta:
+        constraints = (
+            models.UniqueConstraint(
+                fields=(
+                    "session",
+                    "location",
+                    "challenge_slug",
+                    "approach_slug",
+                ),
+                name="unique_session_challange_approach",
+            ),
+        )
+
+    @property
+    def completed(self) -> bool:
+        return self.successes > 0

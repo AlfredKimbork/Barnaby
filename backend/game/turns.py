@@ -57,7 +57,7 @@ def create_turn(
 
     next_turn_number = max(session.turn_number, last_turn_number) + 1
 
-    events = []
+    events = events or []
 
     quest_updates = process_game_events(
         session=session,
