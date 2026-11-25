@@ -7,6 +7,7 @@ from rest_framework.exceptions import APIException
 
 from game.actions import process_attack, process_inspect, process_movement, process_talk
 from game.interactables import process_interactable
+from game.knowledge import finalize_dialogue
 from game.memory import remember
 from game.models import GameSession, GameTurn, NPCState
 from narrator.context import (
@@ -100,21 +101,26 @@ def play_turn(
 
     session.refresh_from_db()  # pyright: ignore
 
-    if action.type == "talk":
-        dialogue_context = build_dialogue_context(
-            session,
-            action,  #   pyright: ignore
-            turn,  #   pyright: ignore
+    if action.type == "talk" and not turn.mechanical_result.get("dialogue_finalized"):  # pyright:ignore
+        npc_state = NPCState.objects.get(
+            session=session,
+            npc__slug=action.target_slug,
         )
 
-        try:
-            dialogue = provider.generate_dialogue(dialogue_context)  # pyright: ignore
-        except AIProviderError:
-            logger.exception("AI provider error during dialogue generation")
-            dialogue = "I have nothing to say right now"  # pyright: ignore
+        dialogue_context = build_dialogue_context(
+            session,
+            action,  # pyright:ignore
+            turn,  # pyright:ignore
+        )
 
-        result = turn.mechanical_result  # pyright: ignore
-        result["response"] = dialogue  # pyright: ignore
+        dialogue = provider.generate_dialogue(dialogue_context)
+
+        turn = finalize_dialogue(
+            turn=turn,  # pyright:ignore
+            npc_state=npc_state,  # pyright:ignore
+            dialogue=dialogue.dialogue,  # pyright:ignore
+            disclosed_ids=dialogue.disclosed_knowledge,  # pyright:ignore
+        )
 
         turn.save(update_fields=["mechanical_result"])  # pyright: ignore
 

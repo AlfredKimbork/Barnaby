@@ -1,3 +1,4 @@
+from functools import cached_property
 from unittest.mock import Mock, patch
 from uuid import uuid4
 
@@ -12,12 +13,16 @@ from characters.models import Character
 from game.checks import resolve_roll_mode, resolve_skill_check, roll_d20
 from game.events import EventCondition, GameEvent
 from game.interactions import calculate_interaction_dc
-from game.knowledge import get_permitted_knowledge
+from game.knowledge import (
+    get_permitted_knowledge,
+    record_knowledge_disclosures,
+)
 from game.mechanics import resolve_attack
-from game.models import GameTurn, NPCState, PlayerState, QuestState
+from game.models import GameTurn, KnowledgeDiscovery, NPCState, PlayerState, QuestState
 from game.progression import get_level
 from game.relationships import apply_relationship_event
 from game.rewards import grant_experience, grant_quest_rewards
+from game.turns import create_turn
 from narrator.providers import GeminiAIProvider
 from world.models import NPC, Campaign, Location, Quest
 
@@ -118,6 +123,20 @@ class GameSessionTests(TestCase):
             character=self.character,  # pyright: ignore
             campaign=self.campaign,  # pyright: ignore
         )
+
+    @cached_property
+    def turn(self):
+        return create_turn(
+            session=self.session,  # pyright:ignore
+            action_id=uuid4(),  # pyright:ignore
+            player_action="Talk to Garrick",  # pyright:ignore
+            narration="",  # pyright:ignore
+            mechanical_result={"type": "talk"},  # pyright:ignore
+        )
+
+    @cached_property
+    def npc_state(self):
+        return NPCState.objects.get(session=self.session, npc=self.npc)
 
     def test_creates_complete_session(self):
         session = create_game_session(
@@ -370,6 +389,83 @@ class GameSessionTests(TestCase):
         self.assertEqual(  # pyright:ignore
             player.max_hp,
             previous_max_hp + result.hp_gained,
+        )
+
+    def test_knowledge_discovery(self):
+        discoveries, events = record_knowledge_disclosures(
+            turn=self.turn,  # pyright:ignore
+            npc_state=self.npc_state,  # pyright:ignore
+            permitted_knowledge=[  # pyright:ignore
+                {
+                    "id": "test_fact",
+                    "text": "A test fact.",
+                }
+            ],
+            disclosed_ids=["test_fact"],  # pyright:ignore
+        )
+
+        self.assertEqual(len(discoveries), 1)  # pyright:ignore
+        self.assertEqual(len(events), 1)  # pyright:ignore
+
+        self.assertEqual(  # pyright:ignore
+            events[0].type,
+            "knowledge_discovered",
+        )
+
+        self.assertTrue(
+            KnowledgeDiscovery.objects.filter(  # pyright:ignore
+                session=self.turn.session,  # pyright:ignore
+                knowledge_id="test_fact",
+            ).exists()
+        )
+
+    def test_unauthorized_knowledge(self):
+        with self.assertRaisesMessage(  # pyright:ignore
+            ValidationError, "AI attempted unauthorized knowledge disclosure."
+        ):
+            record_knowledge_disclosures(
+                turn=self.turn,  # pyright:ignore
+                npc_state=self.npc_state,  # pyright:ignore
+                permitted_knowledge=[],  # pyright:ignore
+                disclosed_ids=["secret_hideout"],  # pyright:ignore
+            )
+
+        self.assertFalse(
+            KnowledgeDiscovery.objects.filter(
+                session=self.turn.session,  # pyright:ignore
+                knowledge_id="secret_hideout",
+            ).exists()
+        )
+
+    def test_duplicate_knowledge(self):
+        kwargs = {
+            "turn": self.turn,
+            "npc_state": self.npc_state,
+            "permitted_knowledge": [
+                {
+                    "id": "test_fact",
+                    "text": "A test fact.",
+                }
+            ],
+            "disclosed_ids": ["test_fact"],
+        }
+
+        first_discoveries, first_events = record_knowledge_disclosures(**kwargs)  # pyright:ignore
+
+        second_discoveries, second_events = record_knowledge_disclosures(**kwargs)  # pyright:ignore
+
+        self.assertEqual(len(first_discoveries), 1)  # pyright:ignore
+        self.assertEqual(len(first_events), 1)  # pyright:ignore
+
+        self.assertEqual(second_discoveries, [])  # pyright:ignore
+        self.assertEqual(second_events, [])  # pyright:ignore
+
+        self.assertEqual(  # pyright:ignore
+            KnowledgeDiscovery.objects.filter(
+                session=self.turn.session,  # pyright:ignore
+                knowledge_id="test_fact",
+            ).count(),
+            1,
         )
 
 
@@ -1059,7 +1155,7 @@ class NPCKnowledgeTest(TestCase):
 
         self.assertEqual(  # pyright: ignore
             get_permitted_knowledge(npc_state.session, npc_state),
-            ["The village is quiet."],
+            [{"id": "public", "text": "The village is quiet."}],
         )
 
         npc_state.trust = 5
@@ -1068,8 +1164,8 @@ class NPCKnowledgeTest(TestCase):
         self.assertEqual(  # pyright: ignore
             get_permitted_knowledge(npc_state.session, npc_state),
             [
-                "The village is quiet.",
-                "I know something important.",
+                {"id": "public", "text": "The village is quiet."},
+                {"id": "private", "text": "I know something important."},
             ],
         )
 

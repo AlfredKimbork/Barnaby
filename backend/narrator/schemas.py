@@ -94,3 +94,9 @@ class AIActionResponse(BaseModel):
         return TypeAdapter(GameAction).validate_python(
             self.model_dump(exclude_none=True)
         )
+
+
+class DialogueResponse(BaseModel):
+    dialogue: str = Field(min_length=1)
+
+    disclosed_knowledge: list[str] = Field(default_factory=list)

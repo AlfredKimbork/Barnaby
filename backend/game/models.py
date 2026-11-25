@@ -268,3 +268,45 @@ class InteractableState(models.Model):
 
     def __str__(self):
         return f"{self.location.slug}/{self.slug}"  # pyright: ignore
+
+
+class KnowledgeDiscovery(models.Model):
+    objects = models.Manager()
+
+    session = models.ForeignKey(
+        GameSession,
+        on_delete=models.CASCADE,
+        related_name="knowledge_discovery",
+    )
+
+    knowledge_id = models.SlugField(max_length=150)
+
+    text = models.TextField()
+
+    source = models.ForeignKey(
+        NPCState,
+        on_delete=models.PROTECT,
+        related_name="knowledge_disclosure",
+    )
+
+    turn = models.ForeignKey(
+        GameTurn,
+        on_delete=models.CASCADE,
+        related_name="knowledge_discoveries",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = (
+            models.UniqueConstraint(
+                fields=(
+                    "session",
+                    "knowledge_id",
+                ),
+                name="unique_session_knowledge",
+            ),
+        )
+
+    def __str__(self):  # pyright:ignore
+        return self.knowledge_id

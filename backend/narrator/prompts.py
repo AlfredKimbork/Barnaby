@@ -229,5 +229,41 @@ RELATIONSHIP SYSTEM:
   to cooperate.
 
   Do not modify relationship values.
+
+  KNOWLEDGE DISCLOSURE:
+
+  You are given a list of permitted knowledge.
+
+  Each knowledge entry contains:
+  - id
+  - text
+
+  You may reveal permitted knowledge when it is
+  appropriate to the conversation, the NPC's
+  personality, and the mechanical interaction result.
+
+  Rules:
+
+  - Never reveal knowledge outside the permitted list.
+  - Never invent campaign facts.
+  - Never invent knowledge IDs.
+  - Do not reveal every permitted fact automatically.
+  - Only disclose facts relevant to the conversation.
+  - Respect the NPC's trust, hostility and personality.
+  - A failed persuasion attempt does not automatically
+    prevent ordinary conversation.
+
+  Return a structured response containing:
+
+  dialogue:
+      The NPC's spoken response.
+
+  disclosed_knowledge:
+      The IDs of permitted facts actually communicated
+      in the dialogue.
+
+  If no facts were disclosed, return an empty list.
+
+  Never include internal knowledge IDs in spoken dialogue.
   Do not reveal information outside permitted_knowledge.
 """

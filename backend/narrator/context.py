@@ -1,5 +1,9 @@
 from game.interactables import get_visible_interactables
-from game.knowledge import get_permitted_knowledge
+from game.knowledge import (
+    get_discovered_knowledge,
+    get_discovered_knowledge_ids,
+    get_permitted_knowledge,
+)
 from game.memory import get_npc_memories
 from game.models import GameSession, GameTurn, NPCState
 from game.quests import get_visible_quests
@@ -61,7 +65,13 @@ def build_dialogue_context(
             "trust": npc_state.trust,
         },
         "memories": memories,
-        "permitted_knowledge": get_permitted_knowledge(session, npc_state),
+        "permitted_knowledge": get_permitted_knowledge(
+            session,
+            npc_state,
+        ),
+        "known_knowledge_ids": sorted(
+            get_discovered_knowledge_ids(session),
+        ),
         "player_message": action.message,
         "location": {
             "slug": session.current_location.slug,  # pyright: ignore
@@ -136,4 +146,5 @@ def build_narrator_context(session: GameSession, turn: GameTurn):
             "mechanical_result": turn.mechanical_result,
         },
         "quests": get_visible_quests(session),
+        "discovered_knowledge": get_discovered_knowledge(session),
     }
