@@ -45,6 +45,21 @@ def create_game_session(
     # each session gets it's own player state
     PlayerState.objects.create(
         session=session,
+        max_hp=10,
+        hp=10,
+        gold=0,
+        inventory=[],
+        level=1,
+        experience=0,
+        strength=character.strength,
+        dexterity=character.dexterity,
+        constitution=character.constitution,
+        intelligence=character.intelligence,
+        wisdom=character.wisdom,
+        charisma=character.charisma,
+        proficient_skills=list(
+            character.proficient_skills,  # pyright: ignore
+        ),
     )
 
     # copy the NPC's starting state into this session

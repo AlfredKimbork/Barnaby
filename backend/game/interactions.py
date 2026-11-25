@@ -1,8 +1,7 @@
 from dataclasses import dataclass
 
-from characters.models import Character
 from game.checks import RollMode, resolve_skill_check
-from game.models import NPCState
+from game.models import NPCState, PlayerState
 from game.relationships import apply_relationship_event
 
 
@@ -66,7 +65,7 @@ def calculate_interaction_dc(
 
 def resolve_interaction(
     *,
-    character: Character,
+    player: PlayerState,
     npc_state: NPCState,
     intent: str,
     modifier: int = 0,
@@ -93,7 +92,7 @@ def resolve_interaction(
 
     if difficulty is not None:
         check = resolve_skill_check(
-            character=character,
+            player=player,
             skill=INTERACTION_SKILLS[intent],
             difficulty=difficulty,
             bonus=modifier,

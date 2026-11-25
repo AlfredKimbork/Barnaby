@@ -3,6 +3,7 @@ from uuid import uuid4
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
 from rest_framework.test import APIClient
@@ -14,7 +15,9 @@ from game.interactions import calculate_interaction_dc
 from game.knowledge import get_permitted_knowledge
 from game.mechanics import resolve_attack
 from game.models import GameTurn, NPCState, PlayerState, QuestState
+from game.progression import get_level
 from game.relationships import apply_relationship_event
+from game.rewards import grant_experience, grant_quest_rewards
 from narrator.providers import GeminiAIProvider
 from world.models import NPC, Campaign, Location, Quest
 
@@ -38,6 +41,40 @@ class GameSessionTests(TestCase):
                 "starting_state": {
                     "location": "tavern",
                     "flags": {"quest_started": False},
+                },
+            },
+        )
+
+        self.quest = Quest.objects.create(
+            campaign=self.campaign,
+            slug="missing_villagers",
+            title="The Missing Villagers",
+            data={
+                "description": "Investigate the missing villagers.",
+                "activation": [
+                    {
+                        "type": "object_discovered",
+                        "target": "notice_board",
+                        "location": "lanterns_rest",
+                    }
+                ],
+                "objectives": [
+                    {
+                        "id": "read_notice",
+                        "description": "Read the notice board.",
+                        "required": True,
+                        "conditions": [
+                            {
+                                "type": "object_discovered",
+                                "target": "notice_board",
+                            }
+                        ],
+                    }
+                ],
+                "rewards": {
+                    "experience": 300,
+                    "gold": 25,
+                    "items": [],
                 },
             },
         )
@@ -229,6 +266,111 @@ class GameSessionTests(TestCase):
 
         self.assertIn("Garrick", narration)
         self.assertIn("standing", narration)
+
+    def test_quest_rewards(self):
+        quest = QuestState.objects.get(
+            session=self.session,
+            quest__slug="missing_villagers",
+        )
+
+        quest.status = "completed"
+        quest.save(update_fields=["status"])
+
+        player = PlayerState.objects.get(session=self.session)
+
+        previous_gold = player.gold
+        previous_experience = player.experience
+
+        result = grant_quest_rewards(quest)
+
+        player.refresh_from_db()
+        quest.refresh_from_db()
+
+        self.assertIsNotNone(result)
+        self.assertTrue(quest.rewards_granted)
+
+        rewards = quest.quest.data["rewards"]
+
+        self.assertEqual(  # pyright:ignore
+            player.gold,
+            previous_gold + rewards.get("gold", 0),
+        )
+
+        self.assertEqual(  # pyright:ignore
+            player.experience,
+            previous_experience + rewards.get("experience", 0),
+        )
+
+    def test_quest_rewards_cannot_be_granted_twice(self):
+        quest = QuestState.objects.get(
+            session=self.session,
+            quest__slug="missing_villagers",
+        )
+
+        quest.status = "completed"
+        quest.save(update_fields=["status"])
+
+        first = grant_quest_rewards(quest)
+
+        player = PlayerState.objects.get(session=self.session)
+
+        gold = player.gold
+        experience = player.experience
+        inventory = list(player.inventory)
+
+        second = grant_quest_rewards(quest)
+
+        player.refresh_from_db()
+
+        self.assertIsNotNone(first)
+        self.assertIsNone(second)
+
+        self.assertEqual(player.gold, gold)  # pyright:ignore
+        self.assertEqual(player.experience, experience)  # pyright:ignore
+        self.assertEqual(player.inventory, inventory)  # pyright:ignore
+
+    def test_incomplete_quest_cannot_grant_rewards(self):
+        quest = QuestState.objects.get(
+            session=self.session,
+            quest__slug="missing_villagers",
+        )
+
+        quest.status = "active"
+        quest.save(update_fields=["status"])
+
+        result = grant_quest_rewards(quest)
+
+        self.assertIsNone(result)
+
+    def test_experience_level_up(self):
+        player = PlayerState.objects.get(session=self.session)
+
+        player.level = 1
+        player.experience = 0
+        player.save()
+
+        previous_max_hp = player.max_hp
+
+        with transaction.atomic():  # pyright:ignore
+            player = PlayerState.objects.select_for_update().get(pk=player.pk)
+
+            result = grant_experience(player, 300)
+
+        player.refresh_from_db()
+
+        self.assertEqual(player.level, 2)  # pyright:ignore
+        self.assertEqual(player.experience, 300)  # pyright:ignore
+        self.assertEqual(result.levels_gained, 1)  # pyright:ignore
+
+        self.assertGreater(
+            player.max_hp,
+            previous_max_hp,
+        )
+
+        self.assertEqual(  # pyright:ignore
+            player.max_hp,
+            previous_max_hp + result.hp_gained,
+        )
 
 
 class AttackMechanicsTest(TestCase):
@@ -1119,12 +1261,13 @@ class InteractionMechanicsTest(TestCase):
 
     @patch("game.checks.randint", return_value=12)
     def test_successful_skill_check(self, mock_roll):
-        self.character.charisma = 16
-        self.character.level = 1
-        self.character.proficient_skills = ["persuasion"]
+        player_state = PlayerState.objects.get(session=self.session)
+        player_state.charisma = 16
+        player_state.level = 1
+        player_state.proficient_skills = ["persuasion"]
 
         result = resolve_skill_check(
-            character=self.character,
+            player=player_state,
             skill="persuasion",
             difficulty=15,
         )
@@ -1223,3 +1366,24 @@ class GameEventTest(SimpleTestCase):
         )
 
         self.assertFalse(condition.matched(event))
+
+
+class ProgressionTests(SimpleTestCase):
+    def test_starting_level(self):
+        self.assertEqual(get_level(0), 1)  # pyright: ignore
+
+    def test_below_threshold(self):
+        self.assertEqual(get_level(299), 1)  # pyright: ignore
+
+    def test_exact_threshold(self):
+        self.assertEqual(get_level(300), 2)  # pyright: ignore
+
+    def test_multiple_levels(self):
+        self.assertEqual(get_level(2700), 4)  # pyright: ignore
+
+    def test_maximum_lvel(self):
+        self.assertEqual(get_level(999999), 20)  # pyright: ignore
+
+    def test_negative_experience(self):
+        with self.assertRaises(ValueError):
+            get_level(-1)

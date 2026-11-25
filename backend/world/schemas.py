@@ -99,6 +99,12 @@ class QuestObjectiveSchema(Schema):
     conditions: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class QuestRewardSchema(Schema):
+    experience: int = Field(default=0, ge=0)
+    gold: int = Field(default=0, ge=0)
+    items: list[str] = Field(default_factory=list)
+
+
 class QuestSchema(Schema):
     id: str
     title: str
@@ -107,6 +113,8 @@ class QuestSchema(Schema):
     activation: list[EventCondition] = Field(default_factory=list)
 
     objectives: list[QuestObjectiveSchema] = Field(default_factory=list)
+
+    rewards: QuestRewardSchema = Field(default_factory=QuestRewardSchema)
 
     @model_validator(mode="after")
     def validate_objectives(self):

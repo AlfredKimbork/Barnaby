@@ -121,9 +121,13 @@ def build_narrator_context(session: GameSession, turn: GameTurn):
         "interactables": get_visible_interactables(session),
         "npcs": visible_npcs,
         "player": {
-            "inventory": session.player_state.inventory,  # pyright: ignore
+            "level": session.player_state.level,  # pyright:ignore
+            "experience": session.player_state.experience,  # pyright:ignore
             "hp": session.player_state.hp,  # pyright: ignore
             "max_hp": session.player_state.max_hp,  # pyright: ignore
+            "gold": session.player_state.gold,  # pyright:ignore
+            "proficiency_bonus": session.player_state.proficiency_bonus,  # pyright:ignore
+            "inventory": session.player_state.inventory,  # pyright: ignore
         },
         "history": history,
         "action": {

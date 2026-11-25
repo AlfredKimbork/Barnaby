@@ -9,7 +9,7 @@ from game.interactables import get_visible_interactables
 from game.interactions import resolve_interaction
 from game.mechanics import resolve_attack
 from game.memory import remember
-from game.models import GameSession, GameTurn, NPCState
+from game.models import GameSession, GameTurn, NPCState, PlayerState
 from game.relationships import apply_relationship_event
 from game.turns import create_turn, get_existing_turn
 from world.models import Location
@@ -364,13 +364,15 @@ def process_talk(
         .first()
     )
 
+    player = PlayerState.objects.select_for_update().get(session=session)
+
     if npc_state is None:
         raise ValidationError(f"Target NPC '{target_slug}' not found in the session.")
 
     narration = f"You speak to {npc_state.npc.name}."
 
     interaction = resolve_interaction(
-        character=session.character,  # pyright: ignore
+        player=player,
         npc_state=npc_state,
         intent=intent,
     )

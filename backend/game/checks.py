@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from random import randint
 from typing import Literal
 
-from characters.models import Character
+from game.models import PlayerState
 
 RollMode = Literal[
     "normal",
@@ -53,7 +53,7 @@ def roll_d20(
 
 def resolve_skill_check(
     *,
-    character: Character,
+    player: PlayerState,
     skill: str,
     difficulty: int,
     attribute: str | None = None,
@@ -62,7 +62,7 @@ def resolve_skill_check(
     disadvantage: bool = False,
 ) -> CheckResult:
     modifier = (
-        character.skill_modifier(
+        player.skill_modifier(
             skill=skill,
             attribute=attribute,
         )

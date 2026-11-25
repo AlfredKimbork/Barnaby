@@ -3,6 +3,7 @@ from uuid import uuid4
 from django.conf import settings
 from django.db import models
 
+from characters.mechanics import CharacterMechanicsMixin
 from characters.models import Character
 from world.models import NPC, Campaign, Location, Quest
 
@@ -70,7 +71,10 @@ class GameTurn(models.Model):
         )
 
 
-class PlayerState(models.Model):
+class PlayerState(
+    CharacterMechanicsMixin,
+    models.Model,
+):
     objects = models.Manager()
     session = models.OneToOneField(
         GameSession,
@@ -78,10 +82,50 @@ class PlayerState(models.Model):
         related_name="player_state",
     )
 
-    hp = models.PositiveIntegerField(default=10)  # pyright: ignore
-    max_hp = models.PositiveIntegerField(default=10)  # pyright: ignore
-    gold = models.PositiveIntegerField(default=0)  # pyright: ignore
-    inventory = models.JSONField(default=list, blank=True)
+    hp = models.PositiveIntegerField(
+        default=10,  # pyright: ignore
+    )
+    max_hp = models.PositiveIntegerField(
+        default=10,  # pyright: ignore
+    )
+    gold = models.PositiveIntegerField(
+        default=0,  # pyright: ignore
+    )
+    inventory = models.JSONField(
+        default=list,
+        blank=True,
+    )
+
+    level = models.PositiveIntegerField(
+        default=1,  # pyright: ignore
+    )
+    experience = models.PositiveIntegerField(
+        default=0,  # pyright: ignore
+    )
+
+    strength = models.PositiveSmallIntegerField(
+        default=10,  # pyright: ignore
+    )
+    dexterity = models.PositiveSmallIntegerField(
+        default=10,  # pyright: ignore
+    )
+    constitution = models.PositiveSmallIntegerField(
+        default=10,  # pyright: ignore
+    )
+    intelligence = models.PositiveSmallIntegerField(
+        default=10.0,  # pyright: ignore
+    )
+    wisdom = models.PositiveSmallIntegerField(
+        default=10,  # pyright: ignore
+    )
+    charisma = models.PositiveSmallIntegerField(
+        default=10,  # pyright: ignore
+    )
+
+    proficient_skills = models.JSONField(
+        default=list,  # pyright: ignore
+        blank=True,
+    )
 
     def take_damage(self, amount: int) -> None:
         self.hp = max(self.hp - amount, 0)  # pyright: ignore
@@ -180,6 +224,8 @@ class QuestState(models.Model):
         default=list,
         blank=True,
     )
+
+    rewards_granted = models.BooleanField(default=False)  # pyright: ignore
 
     class Meta:
         constraints = (

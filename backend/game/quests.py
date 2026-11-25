@@ -1,5 +1,6 @@
 from game.events import EventCondition, GameEvent
 from game.models import GameSession, QuestState
+from game.rewards import grant_quest_rewards
 
 
 def matches_any(
@@ -120,6 +121,7 @@ def process_quest_event(
                     "name": quest_state.quest.title,  # pyright: ignore
                 }
             )
+
     quest_state.save(
         update_fields=[
             "status",
@@ -127,6 +129,14 @@ def process_quest_event(
             "matched_events",
         ]
     )  # pyright: ignore
+
+    if quest_state.status == "completed":
+        reward_update = grant_quest_rewards(
+            quest_state=quest_state  # pyright:ignore
+        )
+
+        if reward_update is not None:
+            updates.append(reward_update)
 
     return updates
 

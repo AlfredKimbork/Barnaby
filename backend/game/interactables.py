@@ -107,7 +107,6 @@ def process_interactable(
         raise ValidationError("Cannot process interactable in a non-active session.")
 
     player = PlayerState.objects.select_for_update().get(session=session)
-    character = session.character
 
     if player.hp <= 0:
         raise ValidationError("Cannot process interactable when player is dead.")
@@ -176,7 +175,7 @@ def process_interactable(
             result["success"] = True
         else:
             check = resolve_skill_check(
-                character=character,  # pyright: ignore
+                player=player,
                 skill="investigation",
                 difficulty=definition.get("difficulty", 10),
             )
@@ -209,7 +208,7 @@ def process_interactable(
             difficulty += 2
 
         check = resolve_skill_check(
-            character=character,  # pyright: ignore
+            player=player,
             skill=OBJECT_SKILLS[operation],
             difficulty=difficulty,
         )

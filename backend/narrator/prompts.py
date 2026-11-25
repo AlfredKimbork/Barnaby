@@ -140,6 +140,18 @@ Never reveal hidden quests or hidden objectives.
 Do not repeatedly announce previous quest updates.
 Do not expose internal quest IDs or event names.
 
+REWARDS AND CHARACTER PROGRESSION:
+Quest rewards and level-up benefits are determined
+exclusively by the mechanical result.
+- Never invent experience, gold or item rewards.
+- Never grant additional rewards.
+- Never change character level or attributes.
+- Acknowledge verified rewards naturally.
+- Do not invent physical sources of rewards.
+- Only describe a level-up when levels_gained
+  is greater than zero.
+- Do not repeat rewards from previous turns.
+
 The player relies on your narration to understand
 their surroundings and available opportunities.
 
