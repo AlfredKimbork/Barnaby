@@ -22,6 +22,7 @@ from game.models import (
     PlayerState,
 )
 
+DEFENDING_BONUS = 2
 DEFAULT_NPC_ATTACK = {
     "id": "unarmed",
     "name": "Unarmed Strike",
@@ -153,7 +154,7 @@ def evaluate_combat_status(encounter: CombatEncounter) -> CombatStatus:
     )
 
     enemies_remaining = any(
-        participant.team == CombatTeam.ENEMY and participant.alive
+        participant.team == CombatTeam.ENEMY and participant.can_act
         for participant in participants
     )
 
@@ -164,6 +165,24 @@ def evaluate_combat_status(encounter: CombatEncounter) -> CombatStatus:
         return CombatStatus.VICTORY
 
     return CombatStatus.ACTIVE
+
+
+def get_combat_defense(
+    participant: CombatParticipant,
+) -> int:
+    if participant.player is not None:
+        defense = get_player_defense(participant.player)  # pyright: ignore
+
+    elif participant.npc is not None:
+        defense = get_npc_defense(participant.npc)  # pyright: ignore
+
+    else:
+        raise RuntimeError("Combat participant has no actor.")
+
+    if participant.defending:
+        defense += DEFENDING_BONUS
+
+    return defense
 
 
 def end_encounter(*, encounter: CombatEncounter, status: CombatStatus) -> None:
@@ -182,57 +201,6 @@ def end_encounter(*, encounter: CombatEncounter, status: CombatStatus) -> None:
             "ended_at",
         ]
     )
-
-
-def advance_combat_turn(
-    encounter: CombatEncounter,
-) -> CombatParticipant | None:
-    if encounter.status != CombatStatus.ACTIVE:
-        return None
-
-    status = evaluate_combat_status(encounter)
-
-    if status != CombatStatus.ACTIVE:
-        end_encounter(
-            encounter=encounter,
-            status=status,
-        )
-
-        return None
-
-    participants = list(
-        CombatParticipant.objects.filter(encounter=encounter)
-        .select_related(
-            "player",
-            "npc",
-        )
-        .order_by("position")
-    )
-
-    count = len(participants)
-
-    for _ in range(count):
-        encounter.turn_index += 1  # pyright: ignore
-
-        if encounter.turn_index >= count:
-            encounter.turn_index = 0  # pyright: ignore
-            encounter.round_number += 1  # pyright: ignore
-
-        participant = participants[encounter.turn_index]  # pyright: ignore
-
-        if not participant.can_act:
-            continue
-
-        encounter.save(
-            update_fields=[
-                "turn_index",
-                "round_number",
-            ]
-        )
-
-        return participant
-
-    raise RuntimeError("No participants can act in this encounter.")
 
 
 def get_combat_context(session: GameSession) -> dict | None:
@@ -331,11 +299,16 @@ def resolve_npc_attack(
 
     attack = select_npc_attack(npc)
 
+    player_participant = CombatParticipant.objects.select_related("player").get(
+        encounter=encounter,
+        player=player,
+    )
+
     result = resolve_combat_attack(
         attack_modifier=attack.get("attack_bonus", 0),
         damage_modifier=attack.get("damage_modifier", 0),
         damage_dice=attack["damage_dice"],
-        defense=get_player_defense(player),
+        defense=get_combat_defense(player_participant),
     )
 
     previous_hp = player.hp
@@ -438,7 +411,7 @@ def resolve_player_attack(
         attack_modifier=(modifier + player.proficiency_bonus),
         damage_modifier=modifier,
         damage_dice=properties["damage_dice"],
-        defense=get_npc_defense(target),
+        defense=get_combat_defense(target_participant),
     )
 
     previous_hp = target.hp
@@ -484,6 +457,7 @@ def get_combat_end_events(encounter: CombatEncounter) -> list[GameEvent]:
         CombatStatus.VICTORY: "combat_won",
         CombatStatus.DEFEAT: "combat_lost",
         CombatStatus.ESCAPED: "combat_escaped",
+        CombatStatus.SURRENDERED: "player_surrendered",
     }
 
     event_type = event_types.get(encounter.status)  # pyright: ignore
@@ -508,6 +482,22 @@ def build_combat_narration(
     lines: list[str] = []
 
     for action in actions:
+        if action["type"] == "player_defend":
+            lines.append("You brace yourself against incoming attacks.")
+            continue
+
+        if action["type"] == "player_flee":
+            if action["success"]:
+                lines.append("You successfully flee from combat.")
+
+            else:
+                lines.append("You attempt to flee from combat, but fail.")
+            continue
+
+        if action["type"] == "player_surrender":
+            lines.append("You surrender to your enemies.")
+            continue
+
         if action["type"] == "player_attack":
             attacker = "You"
             target = action["target_name"]
@@ -548,9 +538,70 @@ def build_combat_narration(
     elif status == CombatStatus.DEFEAT:
         lines.append("You have been defeated.")
 
+    elif status == CombatStatus.ESCAPED:
+        lines.append("You have escaped the encounter.")
+
+    elif status == CombatStatus.SURRENDERED:
+        lines.append("You have surrendered to your enemies.")
+
     return " ".join(lines)
 
 
 def require_outside_combat(session: GameSession) -> None:
     if get_active_combat(session) is not None:
         raise ValidationError("Cannot perform this action during combat.")
+
+
+def advance_combat_turn(
+    encounter: CombatEncounter,
+) -> CombatParticipant | None:
+    if encounter.status != CombatStatus.ACTIVE:
+        return None
+
+    status = evaluate_combat_status(encounter)
+
+    if status != CombatStatus.ACTIVE:
+        end_encounter(
+            encounter=encounter,
+            status=status,
+        )
+
+        return None
+
+    participants = list(
+        CombatParticipant.objects.filter(encounter=encounter)
+        .select_related(
+            "player",
+            "npc",
+        )
+        .order_by("position")
+    )
+
+    count = len(participants)
+
+    for _ in range(count):
+        encounter.turn_index += 1  # pyright: ignore
+
+        if encounter.turn_index >= count:
+            encounter.turn_index = 0  # pyright: ignore
+            encounter.round_number += 1  # pyright: ignore
+
+        participant = participants[encounter.turn_index]  # pyright: ignore
+
+        if not participant.can_act:
+            continue
+
+        if participant.defending:
+            participant.defending = False
+            participant.save(update_fields=["defending"])
+
+        encounter.save(
+            update_fields=[
+                "turn_index",
+                "round_number",
+            ]
+        )
+
+        return participant
+
+    raise RuntimeError("No participants can act in this encounter.")

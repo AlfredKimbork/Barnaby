@@ -73,6 +73,19 @@ class RoleplayAction(BaseModel):
     message: str
 
 
+class DefendAction(BaseModel):
+    type: Literal["defend"]
+
+
+class FleeAction(BaseModel):
+    type: Literal["flee"]
+    destination_slug: str
+
+
+class SurrenderAction(BaseModel):
+    type: Literal["surrender"]
+
+
 GameAction = Annotated[
     AttackAction
     | MoveAction
@@ -80,7 +93,10 @@ GameAction = Annotated[
     | TalkAction
     | InteractionAction
     | SkillCheckAction
-    | RoleplayAction,
+    | RoleplayAction
+    | DefendAction
+    | FleeAction
+    | SurrenderAction,
     Field(discriminator="type"),
 ]
 
@@ -92,23 +108,59 @@ class AIActionResponse(BaseModel):
         "inspect",
         "talk",
         "interact",
+        "skill_check",
+        "roleplay",
+        "defend",
+        "flee",
+        "surrender",
     ]
     target_slug: str | None = None
     weapon_slug: str | None = None
     destination_slug: str | None = None
+
     message: str | None = None
+
     interaction_intent: Interaction = "normal"
+
     operation: ObjectOperation | None = None
     item_slug: str | None = None
+
+    approach: str | None = None
+    intent: str | None = None
+    description: str | None = None
 
     @model_validator(mode="after")
     def valide_action(self):
         required = {
-            "attack": ["target_slug", "weapon_slug"],
-            "move": ["destination_slug"],
-            "inspect": (),
-            "talk": ["target_slug", "message"],
-            "interact": ["target_slug", "operation"],
+            "attack": [
+                "target_slug",
+                "weapon_slug",
+            ],
+            "move": [
+                "destination_slug",
+            ],
+            "inspect": [],
+            "talk": [
+                "target_slug",
+                "message",
+            ],
+            "interact": [
+                "target_slug",
+                "operation",
+                "message",
+            ],
+            "skill_check": [
+                "target_slug",
+                "approach",
+                "intent",
+                "message",
+            ],
+            "roleplay": ["description", "message"],
+            "defend": [],
+            "flee": [
+                "destination_slug",
+            ],
+            "surrender": [],
         }
 
         for field in required[self.type]:

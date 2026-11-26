@@ -19,6 +19,39 @@ class MockAIProvider:
         context: dict,
     ):
         text = message.lower()
+        if context.get("combat") is not None:
+            if "surrender" in text:
+                return action_adapter.validate_python(
+                    {
+                        "type": "surrender",
+                    }
+                )
+
+            if "defend" in text or "block" in text:
+                return action_adapter.validate_python(
+                    {
+                        "type": "defend",
+                    }
+                )
+
+            if "flee" in text or "escape" in text:
+                connections = context.get("connections", [])
+
+                if not connections:
+                    raise ValueError("No escape destinations available.")
+
+                connection = connections[0]
+
+                destination = (
+                    connection["slug"] if isinstance(connection, dict) else connection
+                )
+
+                return action_adapter.validate_python(
+                    {
+                        "type": "flee",
+                        "destination_slug": destination,
+                    }
+                )
 
         if "attack" in text:
             npcs = context.get("npcs", [])

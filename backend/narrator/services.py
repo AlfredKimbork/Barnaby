@@ -6,6 +6,7 @@ from django.core.exceptions import ValidationError
 from rest_framework.exceptions import APIException
 
 from game.actions import process_attack, process_inspect, process_movement, process_talk
+from game.combat_actions import process_combat_action
 from game.general_actions import process_roleplay, process_skill_check
 from game.interactables import process_interactable
 from game.knowledge import finalize_dialogue
@@ -86,6 +87,7 @@ def play_turn(
                 intent=action.interaction_intent,  # pyright: ignore
                 message=action.message,  # pyright: ignore
             )
+
         case "interact":
             turn = process_interactable(
                 session=session,  # pyright: ignore
@@ -94,6 +96,7 @@ def play_turn(
                 operation=action.operation,  # pyright: ignore
                 item_slug=action.item_slug,  # pyright: ignore
             )
+
         case "skill_check":
             turn = process_skill_check(
                 session=session,  # pyright: ignore
@@ -103,11 +106,29 @@ def play_turn(
                 intent=action.intent,  # pyright: ignore
                 original_message=message,  # pyright: ignore
             )
+
         case "roleplay":
             turn = process_roleplay(
                 session=session,  # pyright: ignore
                 action_id=action_id,  # pyright: ignore
                 description=action.description,  # pyright:ignore
+                original_message=message,  # pyright: ignore
+            )
+
+        case "defend" | "surrender":
+            turn = process_combat_action(
+                session=session,  # pyright: ignore
+                action_id=action_id,  # pyright: ignore
+                action=action.type,  # pyright: ignore
+                original_message=message,  # pyright: ignore
+            )
+
+        case "flee":
+            turn = process_combat_action(
+                session=session,  # pyright: ignore
+                action_id=action_id,  # pyright: ignore
+                action=action.type,  # pyright: ignore
+                destination=action.destination_slug,  # pyright: ignore
                 original_message=message,  # pyright: ignore
             )
 

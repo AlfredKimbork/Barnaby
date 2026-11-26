@@ -22,6 +22,7 @@ EventType = Literal[
     "combat_lost",
     "combat_escaped",
     "npc_surrendered",
+    "player_surrendered",
 ]
 
 

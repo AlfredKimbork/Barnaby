@@ -15,9 +15,11 @@ from game.checks import resolve_roll_mode, resolve_skill_check, roll_d20
 from game.combat import (
     advance_combat_turn,
     get_active_combat,
+    get_combat_defense,
     get_current_participant,
     start_combat,
 )
+from game.combat_actions import process_combat_action
 from game.events import EventCondition, GameEvent
 from game.general_actions import process_skill_check
 from game.interactions import calculate_interaction_dc
@@ -35,6 +37,8 @@ from game.mechanics import (
 from game.models import (
     ChallengeState,
     CombatEncounter,
+    CombatParticipant,
+    CombatStatus,
     GameTurn,
     KnowledgeDiscovery,
     NPCState,
@@ -150,7 +154,13 @@ class GameSessionTests(TestCase):
         )
 
         self.location = Location.objects.create(
-            campaign=self.campaign, slug="tavern", name="The Tavern"
+            campaign=self.campaign,
+            slug="tavern",
+            name="The Tavern",
+            data={"connections": ["square"]},
+        )
+        self.square = Location.objects.create(
+            campaign=self.campaign, slug="square", name="Village Square"
         )
 
         self.npc = NPC.objects.create(
@@ -981,6 +991,262 @@ class GameSessionTests(TestCase):
         self.assertIn("npc_killed", event_types)
         self.assertIn("combat_won", event_types)
         self.assertIn("combat_ended", event_types)
+
+    def test_defending_increases_defense(self):
+        encounter = start_combat(
+            session=self.session,  # pyright: ignore
+            enemies=[self.npc_state],  # pyright: ignore
+        )
+
+        participant = CombatParticipant.objects.get(
+            encounter=encounter,
+            team="player",
+        )
+
+        base_defense = get_combat_defense(participant)
+
+        participant.defending = True
+        participant.save(update_fields=["defending"])
+
+        self.assertEqual(  # pyright: ignore
+            get_combat_defense(participant),
+            base_defense + 2,
+        )
+
+    @patch(
+        "game.checks.randint",
+        side_effect=[20, 1, 1],
+    )
+    def test_defend_consumes_turn(
+        self,
+        mock_roll,
+    ):
+        encounter = start_combat(
+            session=self.session,  # pyright: ignore
+            enemies=[self.npc_state],  # pyright: ignore
+        )
+
+        turn = process_combat_action(
+            session=self.session,  # pyright: ignore
+            action_id=uuid4(),  # pyright: ignore
+            action="defend",  # pyright: ignore
+        )
+
+        encounter.refresh_from_db()  # pyright: ignore
+
+        actions = turn.mechanical_result["combat_actions"]  # pyright: ignore
+
+        self.assertEqual(  # pyright: ignore
+            actions[0]["type"],
+            "player_defend",
+        )
+
+        self.assertEqual(  # pyright: ignore
+            actions[1]["type"],
+            "npc_attack",
+        )
+
+        self.assertEqual(  # pyright: ignore
+            encounter.round_number,  # pyright: ignore
+            2,
+        )
+
+        participant = get_current_participant(encounter)  # pyright: ignore
+
+        self.assertTrue(participant.is_player)  # pyright: ignore
+        self.assertFalse(participant.defending)  # pyright: ignore
+
+    @patch(
+        "game.checks.randint",
+        side_effect=[20, 1, 20],
+    )
+    def test_successful_flee(
+        self,
+        mock_roll,
+    ):
+        destination = self.square.slug
+
+        encounter = start_combat(
+            session=self.session,  # pyright: ignore
+            enemies=[self.npc_state],  # pyright: ignore
+        )
+
+        turn = process_combat_action(
+            session=self.session,  # pyright: ignore
+            action_id=uuid4(),  # pyright: ignore
+            action="flee",  # pyright: ignore
+            destination_slug=destination,  # pyright: ignore
+        )
+
+        encounter.refresh_from_db()  # pyright: ignore
+        self.session.refresh_from_db()  # pyright: ignore
+
+        self.assertEqual(  # pyright: ignore
+            encounter.status,  # pyright: ignore
+            CombatStatus.ESCAPED,
+        )
+
+        self.assertEqual(  # pyright: ignore
+            self.session.current_location.slug,  # pyright: ignore
+            destination,
+        )
+
+        self.assertTrue(
+            turn.mechanical_result[  # pyright: ignore
+                "player_result"
+            ]["success"]
+        )
+
+        event_types = {
+            event["type"]
+            for event in turn.mechanical_result["events"]  # pyright: ignore
+        }
+
+        self.assertIn(
+            "combat_escaped",
+            event_types,
+        )
+
+        self.assertIn(
+            "location_entered",
+            event_types,
+        )
+
+    @patch(
+        "game.checks.randint",
+        side_effect=[20, 1, 1, 1],
+    )
+    def test_failed_flee(
+        self,
+        mock_roll,
+    ):
+        original_location = (
+            self.session.current_location  # pyright: ignore
+        )
+
+        destination = self.square.slug
+
+        encounter = start_combat(
+            session=self.session,  # pyright: ignore
+            enemies=[self.npc_state],  # pyright: ignore
+        )
+
+        turn = process_combat_action(
+            session=self.session,  # pyright: ignore
+            action_id=uuid4(),  # pyright: ignore
+            action="flee",  # pyright: ignore
+            destination_slug=destination,  # pyright: ignore
+        )
+
+        encounter.refresh_from_db()  # pyright: ignore
+        self.session.refresh_from_db()  # pyright: ignore
+
+        self.assertEqual(  # pyright: ignore
+            encounter.status,  # pyright: ignore
+            "active",
+        )
+
+        self.assertEqual(  # pyright: ignore
+            self.session.current_location,  # pyright: ignore
+            original_location,
+        )
+
+        self.assertFalse(
+            turn.mechanical_result[  # pyright: ignore
+                "player_result"
+            ]["success"]
+        )
+
+        self.assertEqual(  # pyright: ignore
+            turn.mechanical_result[  # pyright: ignore
+                "combat_actions"
+            ][1]["type"],
+            "npc_attack",
+        )
+
+    @patch(
+        "game.checks.randint",
+        side_effect=[20, 1],
+    )
+    def test_surrender(
+        self,
+        mock_roll,
+    ):
+        encounter = start_combat(
+            session=self.session,  # pyright: ignore
+            enemies=[self.npc_state],  # pyright: ignore
+        )
+
+        turn = process_combat_action(
+            session=self.session,  # pyright: ignore
+            action_id=uuid4(),  # pyright: ignore
+            action="surrender",  # pyright: ignore
+        )
+
+        encounter.refresh_from_db()  # pyright: ignore
+
+        self.assertEqual(  # pyright: ignore
+            encounter.status,  # pyright: ignore
+            CombatStatus.SURRENDERED,
+        )
+
+        self.assertEqual(  # pyright: ignore
+            len(
+                turn.mechanical_result[  # pyright: ignore
+                    "combat_actions"
+                ]
+            ),
+            1,
+        )
+
+        participant = CombatParticipant.objects.get(
+            encounter=encounter,
+            team="player",
+        )
+
+        self.assertTrue(participant.withdrawn)
+
+    @patch(
+        "game.checks.randint",
+        side_effect=[20, 1, 1],
+    )
+    def test_duplicate_defend(
+        self,
+        mock_roll,
+    ):
+        start_combat(
+            session=self.session,  # pyright: ignore
+            enemies=[self.npc_state],  # pyright: ignore
+        )
+
+        action_id = uuid4()
+
+        kwargs = {
+            "session": self.session,
+            "action_id": action_id,
+            "action": "defend",
+        }
+
+        first = process_combat_action(**kwargs)
+        second = process_combat_action(**kwargs)
+
+        self.assertEqual(  # pyright: ignore
+            first.pk,  # pyright: ignore
+            second.pk,  # pyright: ignore
+        )
+
+        self.assertEqual(  # pyright: ignore
+            mock_roll.call_count,
+            3,
+        )
+
+    def test_defend_outside_combat(self):
+        with self.assertRaises(ValidationError):
+            process_combat_action(
+                session=self.session,  # pyright: ignore
+                action_id=uuid4(),  # pyright: ignore
+                action="defend",  # pyright: ignore
+            )
 
 
 class AttackMechanicsTest(TestCase):
