@@ -16,6 +16,12 @@ EventType = Literal[
     "quest_resolved",
     "quest_completed",
     "quest_failed",
+    "combat_started",
+    "combat_ended",
+    "combat_won",
+    "combat_lost",
+    "combat_escaped",
+    "npc_surrendered",
 ]
 
 
@@ -34,6 +40,7 @@ class GameEvent(BaseModel):
     value: str | bool | int | None = None
     quest: str | None = None
     outcome: str | None = None
+    encounter: int | None = None
 
 
 class EventCondition(GameEvent):

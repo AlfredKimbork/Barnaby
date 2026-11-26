@@ -333,7 +333,7 @@ class ChallengeState(models.Model):
     )
 
     location = models.ForeignKey(
-        "world.Location",
+        Location,
         on_delete=models.PROTECT,
     )
 
@@ -362,3 +362,143 @@ class ChallengeState(models.Model):
     @property
     def completed(self) -> bool:
         return self.successes > 0
+
+
+class CombatStatus(models.TextChoices):
+    ACTIVE = "active", "Active"  # pyright: ignore
+    VICTORY = "victory", "Victory"  # pyright: ignore
+    DEFEAT = "defeat", "Defeat"  # pyright: ignore
+    ESCAPED = "escape", "Escape"  # pyright: ignore
+    SURRENDERED = "surrender", "Surrender"  # pyright: ignore
+
+
+class CombatTeam(models.TextChoices):
+    PLAYER = "player", "Player"  # pyright: ignore
+    ENEMY = "enemy", "Enemy"  # pyright: ignore
+    NEUTRAL = "neutral", "Neutral"  # pyright: ignore
+
+
+class CombatEncounter(models.Model):
+    objects = models.Manager()
+
+    session = models.ForeignKey(
+        GameSession,
+        on_delete=models.CASCADE,
+        related_name="combat_encounters",
+    )
+
+    location = models.ForeignKey(
+        Location,
+        on_delete=models.PROTECT,
+    )
+
+    status = models.CharField(
+        max_length=20,
+        choices=CombatStatus.choices,
+        default=CombatStatus.ACTIVE,
+    )
+
+    round_number = models.PositiveIntegerField(default=1)  # pyright: ignore
+    turn_index = models.PositiveIntegerField(default=0)  # pyright: ignore
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    ended_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+
+    class Meta:
+        constraints = (
+            models.UniqueConstraint(
+                fields=["session"],
+                name="unique_active_combat_per_session",
+            ),
+        )
+
+
+class CombatParticipant(models.Model):
+    objects = models.Manager()
+
+    encounter = models.ForeignKey(
+        CombatEncounter,
+        on_delete=models.CASCADE,
+        related_name="participants",
+    )
+
+    player = models.ForeignKey(
+        PlayerState,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+    )
+
+    npc = models.ForeignKey(
+        NPCState,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+    )
+
+    team = models.CharField(
+        max_length=10,
+        choices=CombatTeam.choices,
+    )
+
+    initiative = models.IntegerField()  # pyright: ignore
+    initiative_modifier = models.IntegerField(default=0)  # pyright: ignore
+
+    position = models.PositiveIntegerField()
+
+    defending = models.BooleanField(default=False)  # pyright: ignore
+    withdrawn = models.BooleanField(default=False)  # pyright: ignore
+
+    class Meta:
+        ordering = ("position",)
+        constraints = (
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        player__isnull=False,
+                        npc__isnull=True,
+                        team="player",
+                    )
+                    | models.Q(
+                        player__isnull=True,
+                        npc__isnull=False,
+                        team__in=["enemy", "ally"],
+                    )
+                ),
+                name="valid_combat_participant_actor",
+            ),
+            models.UniqueConstraint(
+                fields=["encounter", "player"],
+                name="unique_combat_player",
+            ),
+            models.UniqueConstraint(
+                fields=["encounter", "npc"],
+                name="unique_combat_npc",
+            ),
+            models.UniqueConstraint(
+                fields=["encounter", "position"],
+                name="unique_combat_position",
+            ),
+        )
+
+    @property
+    def is_player(self) -> bool:
+        return self.player is not None
+
+    @property
+    def alive(self) -> bool:
+        if self.player is not None:
+            return self.player.hp > 0  # pyright: ignore
+
+        if self.npc is not None:
+            return self.npc.alive and self.npc.hp > 0  # pyright: ignore
+
+        return False
+
+    @property
+    def can_act(self) -> bool:
+        return self.alive and not self.withdrawn  #  pyright: ignore

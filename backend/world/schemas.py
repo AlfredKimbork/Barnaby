@@ -1,5 +1,6 @@
 from typing import Any, Literal
 
+from django.views.debug import re
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from characters.skills import SKILL_ATTRIBUTES
@@ -130,6 +131,40 @@ class SecretSchema(Schema):
     reveal_condition: dict[str, Any] = Field(default_factory=dict)
 
 
+class NPCAttackSchema(Schema):
+    id: str
+    name: str
+
+    attack_bonus: int = 0
+    damage_modifier: int = 0
+
+    damage_dice: str = Field(
+        pattern=r"([1-9]\d*)d([1-9]\d*)",
+    )
+
+    damage_type: str = "bludgeoning"
+
+    @model_validator(mode="after")
+    def validate_damate_dict(self):
+        count, sides = map(
+            int,
+            self.damage_dice.lower().strip().split("d"),
+        )
+
+        if count > 20 or sides > 100:
+            raise ValueError(f"Damage dice out of bounds: {self.damage_dice}")
+
+        return self
+
+
+class NPCCombatSchema(Schema):
+    initiative: int = 0
+
+    attacks: list[NPCAttackSchema] = Field(
+        default_factory=list,
+    )
+
+
 class NPCSchema(Schema):
     id: str
     name: str
@@ -137,6 +172,10 @@ class NPCSchema(Schema):
     species: str
     role: str
     location: str
+
+    combat: NPCCombatSchema = Field(
+        default_factory=NPCCombatSchema,
+    )
 
     appearance: str
     background: str
@@ -192,11 +231,15 @@ class QuestOutcomeSchema(Schema):
 
     priority: int = 0
 
+    qonsequences: QuestConsequencesSchema = Field(
+        default_factory=QuestConsequencesSchema
+    )
+
     rewards: QuestRewardSchema = Field(default_factory=QuestRewardSchema)
 
     @model_validator(mode="after")
     def validate_requirements(self):
-        if not self.required_objectives and not self.conditions_mode:
+        if not self.required_objectives and not self.conditions:
             raise ValidationError("Quest outcomes must have requirements.")
 
         return self
@@ -270,7 +313,55 @@ class ItemSchema(Schema):
     name: str
     type: str
     description: str = ""
-    properties: dict[str, Any] = Field(default_factory=dict)
+
+    properties: dict[str, Any] = Field(
+        default_factory=dict,
+    )
+
+    @model_validator(mode="after")
+    def validate_weapon(self):
+        if self.type == "weapon":
+            return self
+
+        damage_dice = self.properties.get("damage_dice")
+
+        if not isinstance(damage_dice, str):
+            raise ValidationError(
+                f"Item '{self.id}' of type '{self.type}' must have a 'damage_dice' property of type str"
+            )
+
+        match = re.fullmatch(
+            r"([1-9]\d*)d([1-9]\d*)",
+            damage_dice,
+        )
+
+        if match is None:
+            raise ValidationError(
+                f"Item '{self.id}' has invalid damage dice: '{damage_dice}'"
+            )
+
+        count, sides = map(int, match.groups())
+
+        if count > 20 or sides > 100:
+            raise ValidationError(
+                f"Item '{self.id}' has damage dice out of bounds: '{damage_dice}'"
+            )
+
+        attribute = self.properties.get(
+            "damage_attribute",
+            "strength",
+        )
+
+        if attribute not in {
+            "strength",
+            "dexterity",
+            "finesse",
+        }:
+            raise ValidationError(
+                f"Item '{self.id}' has invalid damage attribute: '{attribute}'"
+            )
+
+        return self
 
 
 class EnemiesSchema(Schema):

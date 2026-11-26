@@ -11,6 +11,12 @@ from rest_framework.test import APIClient
 
 from characters.models import Character
 from game.checks import resolve_roll_mode, resolve_skill_check, roll_d20
+from game.combat import (
+    advance_combat_turn,
+    get_active_combat,
+    get_current_participant,
+    start_combat,
+)
 from game.events import EventCondition, GameEvent
 from game.general_actions import process_skill_check
 from game.interactions import calculate_interaction_dc
@@ -18,7 +24,13 @@ from game.knowledge import (
     get_permitted_knowledge,
     record_knowledge_disclosures,
 )
-from game.mechanics import resolve_attack
+from game.mechanics import (
+    parse_damage_dice,
+    resolve_attack,
+    resolve_combat_attack,
+    roll_damage,
+    roll_initiative,
+)
 from game.models import (
     ChallengeState,
     GameTurn,
@@ -628,6 +640,143 @@ class GameSessionTests(TestCase):
         )
 
         self.assertEqual(followup.status, "active")  # pyright:ignore
+
+    def test_start_combat(self):
+        encounter = start_combat(
+            session=self.session,  # pyright:ignore
+            enemies=[self.npc_state],  # pyright:ignore
+        )
+
+        self.assertEqual(encounter.status, "active")  # pyright:ignore
+        self.assertEqual(encounter.round_number, 1)  # pyright:ignore
+        self.assertEqual(encounter.turn_index, 0)  # pyright:ignore
+
+        self.assertEqual(  # pyright:ignore
+            encounter.participants.count(),  # pyright:ignore
+            2,
+        )
+
+    @patch(
+        "game.checks.randint",
+        side_effect=[5, 18],
+    )
+    def test_combat_initiative_order(
+        self,
+        mock_roll,
+    ):
+        player = PlayerState.objects.get(session=self.session)
+
+        player.dexterity = 10
+        player.save(update_fields=["dexterity"])
+
+        encounter = start_combat(
+            session=self.session,  # pyright:ignore
+            enemies=[self.npc_state],  # pyright:ignore
+        )
+
+        participant = get_current_participant(encounter)  # pyright:ignore
+
+        self.assertIsNotNone(participant)
+
+        self.assertEqual(  # pyright:ignore
+            participant.npc_id,  # pyright:ignore
+            self.npc_state.pk,
+        )
+
+    def test_duplicate_combat(self):
+        start_combat(
+            session=self.session,  # pyright:ignore
+            enemies=[self.npc_state],  # pyright:ignore
+        )
+
+        with self.assertRaisesMessage(  #  pyright: ignore
+            ValidationError,
+            "A combat encounter is already active for this session.",
+        ):
+            start_combat(
+                session=self.session,  # pyright:ignore
+                enemies=[self.npc_state],  # pyright:ignore
+            )
+
+    def test_combat_round_progression(self):
+        encounter = start_combat(
+            session=self.session,  # pyright:ignore
+            enemies=[self.npc_state],  # pyright:ignore
+        )
+
+        advance_combat_turn(encounter)  # pyright:ignore
+
+        self.assertEqual(encounter.turn_index, 1)  # pyright:ignore
+        self.assertEqual(encounter.round_number, 1)  # pyright:ignore
+
+        advance_combat_turn(encounter)  # pyright:ignore
+
+        self.assertEqual(encounter.turn_index, 0)  # pyright:ignore
+        self.assertEqual(encounter.round_number, 2)  # pyright:ignore
+
+    def test_combat_victory(self):
+        encounter = start_combat(
+            session=self.session,  # pyright:ignore
+            enemies=[self.npc_state],  # pyright:ignore
+        )
+
+        self.npc_state.hp = 0
+        self.npc_state.alive = False
+
+        self.npc_state.save(update_fields=["hp", "alive"])
+
+        participant = advance_combat_turn(
+            encounter  # pyright:ignore
+        )
+
+        encounter.refresh_from_db()  # pyright:ignore
+
+        self.assertIsNone(participant)
+        self.assertEqual(encounter.status, "victory")  # pyright:ignore
+        self.assertIsNotNone(encounter.ended_at)  # pyright:ignore
+
+        self.assertIsNone(
+            get_active_combat(self.session)  # pyright:ignore
+        )
+
+    def test_combat_defeat(self):
+        encounter = start_combat(
+            session=self.session,  # pyright:ignore
+            enemies=[self.npc_state],  # pyright:ignore
+        )
+
+        player = PlayerState.objects.get(session=self.session)
+
+        player.take_damage(player.hp)
+
+        participant = advance_combat_turn(
+            encounter  # pyright:ignore
+        )
+
+        encounter.refresh_from_db()  # pyright:ignore
+
+        self.assertIsNone(participant)
+        self.assertEqual(encounter.status, "defeat")  # pyright:ignore
+
+    def test_combat_rejects_other_session_npc(self):
+        other_session = create_game_session(
+            owner=self.user,  # pyright: ignore
+            character=self.character,  # pyright: ignore
+            campaign=self.campaign,  # pyright: ignore
+        )
+
+        other_npc = NPCState.objects.get(
+            session=other_session,
+            npc=self.npc,
+        )
+
+        with self.assertRaisesMessage(  # pyright: ignore
+            ValidationError, "Some enemies are not valid for this session."
+        ):
+            start_combat(
+                session=self.session,  # pyright: ignore
+                enemies=[other_npc],  # pyright: ignore
+            )
 
 
 class AttackMechanicsTest(TestCase):
@@ -1808,4 +1957,114 @@ class QuestConditionTests(SimpleTestCase):
                 self.events,
                 mode="all",
             )
+        )
+
+
+class CombatMechanicsTests(SimpleTestCase):
+    def test_parse_damage_dice(self):
+        self.assertEqual(  # pyright: ignore
+            parse_damage_dice("2d6"),
+            (2, 6),
+        )
+
+    def test_invalid_damage_dice(self):
+        with self.assertRaises(ValueError):
+            parse_damage_dice("invalid")
+
+    @patch(
+        "game.mechanics.randint",
+        return_value=4,
+    )
+    def test_damage_roll(self, mock_roll):
+        self.assertEqual(  # pyright: ignore
+            roll_damage("2d6"),
+            (4, 4),
+        )
+
+    @patch(
+        "game.mechanics.randint",
+        return_value=4,
+    )
+    def test_critical_damage(self, mock_roll):
+        self.assertEqual(  # pyright: ignore
+            roll_damage("2d6", critical=True),
+            (4, 4, 4, 4),
+        )
+
+    @patch(
+        "game.checks.randint",
+        return_value=15,
+    )
+    def test_initiative(self, mock_roll):
+        result = roll_initiative(3)
+
+        self.assertEqual(result.roll, 15)  # pyright: ignore
+        self.assertEqual(result.total, 18)  # pyright: ignore
+
+    @patch(
+        "game.mechanics.randint",
+        return_value=5,
+    )
+    @patch(
+        "game.checks.randint",
+        return_value=15,
+    )
+    def test_successful_attack(
+        self,
+        mock_attack,
+        mock_damage,
+    ):
+        result = resolve_combat_attack(
+            attack_modifier=5,
+            damage_modifier=3,
+            damage_dice="1d6",
+            defense=14,
+        )
+
+        self.assertTrue(result.hit)
+        self.assertFalse(result.critical)
+        self.assertEqual(result.total, 20)  # pyright: ignore
+        self.assertEqual(result.damage, 8)  # pyright: ignore
+
+    @patch(
+        "game.checks.randint",
+        return_value=1,
+    )
+    def test_natural_one(self, mock_roll):
+        result = resolve_combat_attack(
+            attack_modifier=20,
+            damage_modifier=3,
+            damage_dice="1d6",
+            defense=10,
+        )
+
+        self.assertFalse(result.hit)
+        self.assertEqual(result.damage, 0)  # pyright: ignore
+
+    @patch(
+        "game.mechanics.randint",
+        return_value=4,
+    )
+    @patch(
+        "game.checks.randint",
+        return_value=20,
+    )
+    def test_natural_twenty(
+        self,
+        mock_attack,
+        mock_damage,
+    ):
+        result = resolve_combat_attack(
+            attack_modifier=0,
+            damage_modifier=3,
+            damage_dice="1d6",
+            defense=30,
+        )
+
+        self.assertTrue(result.hit)
+        self.assertTrue(result.critical)  # pyright: ignore
+        self.assertEqual(result.damage, 11)  # pyright: ignore
+        self.assertEqual(  # pyright: ignore
+            result.damage_rolls,
+            (4, 4),
         )
