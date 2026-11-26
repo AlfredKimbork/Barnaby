@@ -5,6 +5,7 @@ from django.db import transaction
 from pydantic import ValidationError
 
 from game.checks import resolve_skill_check
+from game.combat import require_outside_combat
 from game.events import GameEvent
 from game.models import ChallengeState, GameSession, GameTurn, PlayerState
 from game.turns import create_turn, get_existing_turn
@@ -26,7 +27,11 @@ def get_challenge(
 
 def get_approach(challenge: dict, approach_slug: str) -> dict | None:
     return next(
-        (approach for approach in challenge["approaches"] if approach["id"] == approach_slug),
+        (
+            approach
+            for approach in challenge["approaches"]
+            if approach["id"] == approach_slug
+        ),
         None,
     )
 
@@ -187,6 +192,8 @@ def process_skill_check(
     if existing:
         return existing
 
+    require_outside_combat(session)
+
     player = PlayerState.objects.select_for_update().get(session=session)
 
     if session.status != "active":
@@ -264,6 +271,8 @@ def process_roleplay(
 
     if existing:
         return existing
+
+    require_outside_combat(session)
 
     player = PlayerState.objects.get(session=session)
 

@@ -6,6 +6,7 @@ from django.db import transaction
 from pydantic import ValidationError
 
 from game.checks import resolve_skill_check
+from game.combat import require_outside_combat
 from game.events import GameEvent
 from game.models import GameSession, GameTurn, InteractableState, PlayerState
 from game.turns import create_turn, get_existing_turn
@@ -102,6 +103,8 @@ def process_interactable(
 
     if existing:
         return existing
+
+    require_outside_combat(session)
 
     if session.status != "active":
         raise ValidationError("Cannot process interactable in a non-active session.")

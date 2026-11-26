@@ -62,6 +62,7 @@ def play_turn(
                 action_id=action_id,  # pyright: ignore
                 target_slug=action.target_slug,  # pyright: ignore
                 weapon_slug=action.weapon_slug,  # pyright: ignore
+                original_message=message,  # pyright: ignore
             )
 
         case "move":

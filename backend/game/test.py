@@ -10,6 +10,7 @@ from django.urls import reverse
 from rest_framework.test import APIClient
 
 from characters.models import Character
+from game.actions import process_attack
 from game.checks import resolve_roll_mode, resolve_skill_check, roll_d20
 from game.combat import (
     advance_combat_turn,
@@ -33,6 +34,7 @@ from game.mechanics import (
 )
 from game.models import (
     ChallengeState,
+    CombatEncounter,
     GameTurn,
     KnowledgeDiscovery,
     NPCState,
@@ -45,11 +47,23 @@ from game.relationships import apply_relationship_event
 from game.rewards import grant_experience, grant_quest_rewards
 from game.turns import create_turn
 from narrator.providers import GeminiAIProvider
-from world.models import NPC, Campaign, Location, Quest
+from world.models import NPC, Campaign, Item, Location, Quest
 
 from .services import create_game_session
 
 User = get_user_model()
+
+
+def equip_rusty_sword(session):
+    Item.objects.create(
+        campaign=session.campaign,
+        slug="rusty_sword",
+        name="Rusty Sword",
+        data={"type": "weapon", "properties": {"damage_dice": "1d6"}},
+    )
+    player = PlayerState.objects.get(session=session)
+    player.inventory = ["rusty_sword"]
+    player.save(update_fields=["inventory"])
 
 
 @patch.dict("os.environ", {"AI_PROVIDER": "mock"})
@@ -183,6 +197,8 @@ class GameSessionTests(TestCase):
             character=self.character,  # pyright: ignore
             campaign=self.campaign,  # pyright: ignore
         )
+
+        equip_rusty_sword(self.session)
 
     @cached_property
     def turn(self):
@@ -778,6 +794,194 @@ class GameSessionTests(TestCase):
                 enemies=[other_npc],  # pyright: ignore
             )
 
+    @patch(
+        "game.checks.randint",
+        side_effect=[20, 1, 10, 1],
+    )
+    @patch(
+        "game.mechanics.randint",
+        return_value=1,
+    )
+    def test_attack_starts_combat(
+        self,
+        mock_damage,
+        mock_d20,
+    ):
+        turn = process_attack(
+            session=self.session,  # pyright:ignore
+            action_id=uuid4(),  # pyright:ignore
+            target_slug=self.npc.slug,  # pyright:ignore
+            weapon_slug="rusty_sword",  # pyright:ignore
+        )
+
+        result = turn.mechanical_result  # pyright:ignore
+
+        self.assertTrue(result["combat_started"])
+
+        self.assertTrue(result["player_attack_executed"])
+
+        self.assertEqual(  # pyright:ignore
+            result["combat_status"],
+            "active",
+        )
+
+        self.assertIsNotNone(
+            get_active_combat(self.session)  # pyright:ignore
+        )
+
+        self.assertEqual(  # pyright:ignore
+            result["combat_actions"][0]["type"],
+            "player_attack",
+        )
+
+    @patch(
+        "game.checks.randint",
+        side_effect=[20, 1, 1, 20],
+    )
+    @patch(
+        "game.mechanics.randint",
+        return_value=1,
+    )
+    def test_enemy_retaliates(
+        self,
+        mock_damage,
+        mock_d20,
+    ):
+        player = PlayerState.objects.get(session=self.session)
+
+        previous_hp = player.hp
+
+        turn = process_attack(
+            session=self.session,  # pyright:ignore
+            action_id=uuid4(),  # pyright:ignore
+            target_slug=self.npc.slug,  # pyright:ignore
+            weapon_slug="rusty_sword",  # pyright:ignore
+        )
+
+        player.refresh_from_db()
+
+        actions = turn.mechanical_result[  # pyright:ignore
+            "combat_actions"
+        ]
+
+        self.assertEqual(len(actions), 2)  # pyright:ignore
+
+        self.assertEqual(  # pyright:ignore
+            actions[0]["type"],
+            "player_attack",
+        )
+
+        self.assertEqual(  # pyright:ignore
+            actions[1]["type"],
+            "npc_attack",
+        )
+
+        self.assertLess(
+            player.hp,
+            previous_hp,
+        )
+
+    @patch(
+        "game.checks.randint",
+        side_effect=[20, 1, 1, 1],
+    )
+    def test_duplicate_combat_action(
+        self,
+        mock_d20,
+    ):
+        action_id = uuid4()
+
+        kwargs = {
+            "session": self.session,
+            "action_id": action_id,
+            "target_slug": self.npc.slug,
+            "weapon_slug": "rusty_sword",
+        }
+
+        first = process_attack(**kwargs)
+
+        player = PlayerState.objects.get(session=self.session)
+
+        player_hp = player.hp
+
+        self.npc_state.refresh_from_db()
+
+        npc_hp = self.npc_state.hp
+
+        second = process_attack(**kwargs)
+
+        player.refresh_from_db()
+        self.npc_state.refresh_from_db()
+
+        self.assertEqual(first.pk, second.pk)  # pyright: ignore
+
+        self.assertEqual(player.hp, player_hp)  # pyright: ignore
+
+        self.assertEqual(  # pyright: ignore
+            self.npc_state.hp,
+            npc_hp,
+        )
+
+        self.assertEqual(  # pyright: ignore
+            GameTurn.objects.filter(
+                session=self.session,
+                action_id=action_id,
+            ).count(),
+            1,
+        )
+
+        self.assertEqual(  # pyright: ignore
+            CombatEncounter.objects.filter(
+                session=self.session,
+            ).count(),
+            1,
+        )
+
+        self.assertEqual(mock_d20.call_count, 4)  # pyright: ignore
+
+    @patch(
+        "game.checks.randint",
+        side_effect=[20, 1, 20],
+    )
+    @patch(
+        "game.mechanics.randint",
+        return_value=6,
+    )
+    def test_attack_combat_victory(
+        self,
+        mock_damage,
+        mock_d20,
+    ):
+        self.npc_state.hp = 1
+
+        self.npc_state.save(update_fields=["hp"])
+
+        turn = process_attack(
+            session=self.session,  # pyright: ignore
+            action_id=uuid4(),  # pyright: ignore
+            target_slug=self.npc.slug,  # pyright: ignore
+            weapon_slug="rusty_sword",  # pyright: ignore
+        )
+
+        result = turn.mechanical_result  # pyright: ignore
+
+        self.assertEqual(  # pyright: ignore
+            result["combat_status"],
+            "victory",
+        )
+
+        self.assertFalse(result["target_alive"])
+
+        self.assertIsNone(
+            get_active_combat(self.session)  # pyright: ignore
+        )
+
+        event_types = {event["type"] for event in result["events"]}
+
+        self.assertIn("npc_killed", event_types)
+        self.assertIn("combat_won", event_types)
+        self.assertIn("combat_ended", event_types)
+
 
 class AttackMechanicsTest(TestCase):
     @patch("game.mechanics.roll_d20", return_value=(15, (15,)))
@@ -875,9 +1079,7 @@ class AttackActionTest(TestCase):
             campaign=self.campaign,  # pyright: ignore
         )
 
-        player = PlayerState.objects.get(session=self.session)
-        player.inventory = ["rusty_sword"]
-        player.save(update_fields=["inventory"])
+        equip_rusty_sword(self.session)
 
     def attack(self, *, action_id=None, target="garrick"):
         return self.client.post(
@@ -891,8 +1093,9 @@ class AttackActionTest(TestCase):
             format="json",
         )
 
-    @patch("game.mechanics.roll_d20", return_value=(15, (15,)))
-    def test_attack_creates_turn_and_deals_damage(self, mock_roll):
+    @patch("game.mechanics.randint", return_value=5)
+    @patch("game.checks.randint", side_effect=[20, 1, 15, 1])
+    def test_attack_creates_turn_and_deals_damage(self, mock_roll, mock_damage):
         response = self.attack()
 
         self.assertEqual(response.status_code, 201)  # pyright: ignore
@@ -907,8 +1110,9 @@ class AttackActionTest(TestCase):
         self.assertEqual(npc_state.hp, 13)  # pyright: ignore
         self.assertEqual(GameTurn.objects.filter(session=self.session).count(), 1)  # pyright: ignore
 
-    @patch("game.mechanics.roll_d20", return_value=(15, (15,)))
-    def test_duplicate_action_does_not_deal_damage_twice(self, mock_roll):
+    @patch("game.mechanics.randint", return_value=5)
+    @patch("game.checks.randint", side_effect=[20, 1, 15, 1])
+    def test_duplicate_action_does_not_deal_damage_twice(self, mock_roll, mock_damage):
         action_id = uuid4()
 
         first = self.attack(action_id=action_id)

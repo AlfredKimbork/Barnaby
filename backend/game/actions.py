@@ -4,15 +4,33 @@ from uuid import UUID
 from django.core.exceptions import ValidationError
 from django.db import transaction
 
+from game.combat import (
+    advance_combat_turn,
+    build_combat_narration,
+    get_active_combat,
+    get_combat_context,
+    get_combat_end_events,
+    process_npc_turns,
+    require_outside_combat,
+    resolve_player_attack,
+    start_combat,
+)
 from game.events import GameEvent
 from game.interactables import get_visible_interactables
 from game.interactions import resolve_interaction
-from game.mechanics import resolve_attack
 from game.memory import remember
-from game.models import GameSession, GameTurn, NPCState, PlayerState
+from game.models import (
+    CombatParticipant,
+    CombatStatus,
+    CombatTeam,
+    GameSession,
+    GameTurn,
+    NPCState,
+    PlayerState,
+)
 from game.relationships import apply_relationship_event
 from game.turns import create_turn, get_existing_turn
-from world.models import Location
+from world.models import Item, Location
 
 
 @transaction.atomic
@@ -22,8 +40,8 @@ def process_attack(
     action_id: UUID,
     target_slug: str,
     weapon_slug: str,
+    original_message: str = "",
 ) -> GameTurn:
-    # Lock the session to serialize actions within the playthrough
     session = GameSession.objects.select_for_update().get(pk=session.pk)
 
     existing = get_existing_turn(
@@ -42,7 +60,7 @@ def process_attack(
     if session.status != "active":
         raise ValidationError("Cannot process action for an inactive session.")
 
-    player = session.player_state  # pyright: ignore
+    player = PlayerState.objects.select_for_update().get(session=session)
 
     if player.hp <= 0:  # pyright: ignore
         raise ValidationError("Cannot process action for a dead character.")
@@ -74,66 +92,134 @@ def process_attack(
             f"Player does not have weapon '{weapon_slug}' in inventory."
         )
 
-    # Temporary weapon rules for the MVP
-    weapon_damage = {
-        "rusty_sword": 5,
-        "hunting_bow": 4,
-    }.get(weapon_slug)
+    weapon = Item.objects.filter(campaign=session.campaign, slug=weapon_slug).first()
 
-    if weapon_damage is None:
-        raise ValueError(f"Weapon '{weapon_slug}' is not a valid weapon.")
+    if weapon is None:
+        raise ValidationError(f"Weapon '{weapon_slug}' not found in the campaign.")
 
-    events = []
+    if weapon.data.get("type") != "weapon":
+        raise ValidationError(f"Item '{weapon_slug}' is not a weapon.")
 
-    defense = target.state.get("defense", 10)
+    properties = weapon.data.get("properties", {})
 
-    result = resolve_attack(
-        strength=session.character.strength,  # pyright: ignore
-        weapon_damage=weapon_damage,
-        defense=defense,
-    )
+    if not properties.get("damage_dice"):
+        raise ValidationError(
+            f"Weapon '{weapon_slug}' does not have damage properties."
+        )
 
-    target.hp = max(0, target.hp - result.damage)
-    target.alive = target.hp > 0
-    target.hostility = max(target.hostility, 1)
-    target.save(update_fields=["hp", "alive", "hostility"])
+    events: list[GameEvent] = []
+    combat_action: list[dict] = []
 
-    if not target.alive:
+    encounter = get_active_combat(session)
+
+    combat_started = encounter is None
+
+    if encounter is None:
+        encounter = start_combat(
+            session=session,  # pyright: ignore
+            enemies=[target],  # pyright: ignore
+        )
+
         events.append(
             GameEvent(
-                type="npc_killed",
-                target=target_slug,
-                npc=target_slug,
-                location=target.current_location.slug,
+                type="combat_started",
+                encounter=encounter.pk,  # pyright: ignore
+                location=session.current_location.slug,  # pyright: ignore
             )
         )
 
-    narration = (
-        f"You attack {target.npc.name} with your {weapon_slug.replace('_', ' ')}. "
-    )
-
-    if result.hit:
-        narration += (
-            f"You hit for {result.damage} damage! "
-            f"{target.npc.name} has {target.hp} HP remaining. "
-        )
     else:
-        narration += f"You miss! {target.npc.name} has {target.hp} HP remaining. "
+        particpant_exists = CombatParticipant.objects.filter(
+            encounter=encounter,
+            npc=target,
+            team=CombatTeam.ENEMY,
+            withdrawn=False,
+        ).exists()
+
+        if not particpant_exists:
+            raise ValidationError(
+                f"Target NPC '{target_slug}' is not a participant in the active combat encounter."
+            )
+
+    encounter = type(encounter).objects.select_for_update().get(pk=encounter.pk)  # pyright: ignore
+
+    combat_action.extend(process_npc_turns(encounter=encounter))
+
+    player.refresh_from_db()
+    target.refresh_from_db()
+
+    player_attack = None
+
+    if encounter.status == CombatStatus.ACTIVE and player.hp > 0:
+        player_attack = resolve_player_attack(
+            encounter=encounter,
+            player=player,
+            target=target,
+            weapon_slug=weapon_slug,
+            properties=properties,
+        )
+
+        combat_action.append(player_attack)
+
+        apply_relationship_event(
+            npc_state=target,  # pyright: ignore
+            event="attacked_npc",  # pyright: ignore
+        )
+
+        target.refresh_from_db()
+
+        if not target.alive:
+            events.append(
+                GameEvent(
+                    type="npc_killed",
+                    target=target_slug,
+                    npc=target_slug,
+                    location=target.current_location.slug,
+                )
+            )
+
+        advance_combat_turn(encounter)
+
+    combat_action.extend(process_npc_turns(encounter=encounter))
+
+    player.refresh_from_db()
+    target.refresh_from_db()
+
+    narration = build_combat_narration(
+        actions=combat_action,
+        status=encounter.status,
+    )
 
     turn = create_turn(
         session=session,  # pyright: ignore
         action_id=action_id,  # pyright: ignore
         player_action=f"Attack {target_slug} with {weapon_slug}",  # pyright: ignore
+        original_message=original_message,  # pyright: ignore
         narration=narration,  # pyright: ignore
         mechanical_result={  # pyright: ignore
             "type": "attack",
             "target": target_slug,
             "weapon": weapon_slug,
-            "relationship_event": "attacked_npc",
-            "npc_trust": target.trust,  # pyright: ignore
-            "npc_hostility": target.hostility,  # pyright: ignore
+            "combat_started": combat_started,
+            "combat_id": encounter.pk,
+            "combat_status": encounter.status,
+            "combat_round": encounter.round_number,
+            "combat_actions": combat_action,
+            "attack_result": (
+                player_attack["attack_result"] if player_attack is not None else None
+            ),
+            "player_attack_executed": (player_attack is not None),
+            "player_remaining_hp": player.hp,
+            "target_remaining_hp": target.hp,
+            "target_alive": target.alive,
+            "npc_trust": target.trust,
+            "npc_hostility": target.hostility,
+            "relationship_event": (
+                "attacked_npc" if player_attack is not None else None
+            ),
+            "combat": get_combat_context(session),
         },
-        events=events,  # pyright: ignore
+        events=events + get_combat_end_events(encounter),  # pyright: ignore
     )
 
     apply_relationship_event(npc_state=target, event="attacked_npc")  # pyright: ignore
@@ -172,6 +258,8 @@ def process_movement(
 
     if existing:
         return existing
+
+    require_outside_combat(session)
 
     if session.status != "active":
         raise ValidationError("Cannot process action for an inactive session.")
@@ -345,6 +433,8 @@ def process_talk(
 
     if existing:
         return existing
+
+    require_outside_combat(session)
 
     if session.status != "active":
         raise ValidationError("Cannot process action for an inactive session.")
