@@ -51,7 +51,7 @@ def grant_quest_rewards(
         .get(pk=quest_state.pk)
     )
 
-    if quest_state.status != "completed":
+    if quest_state.status not in {"completed", "failed"}:
         return None
 
     if quest_state.rewards_granted:
@@ -60,7 +60,22 @@ def grant_quest_rewards(
     player = PlayerState.objects.select_for_update().get(session=quest_state.session)
 
     quest_data = quest_state.quest.data  # pyright:ignore
-    rewards = quest_data.get("rewards") or {}
+    if quest_state.outcome:
+        outcome = next(
+            (
+                outcome
+                for outcome in quest_data.get("outcomes", [])
+                if outcome["id"] == quest_state.outcome
+            ),
+            None,
+        )
+        if outcome is None:
+            return None
+        rewards = outcome.get("rewards") or {}
+    elif quest_state.status == "completed":
+        rewards = quest_data.get("rewards") or {}
+    else:
+        return None
 
     result = grant_rewards(
         player=player,

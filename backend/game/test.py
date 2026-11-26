@@ -28,6 +28,7 @@ from game.models import (
     QuestState,
 )
 from game.progression import get_level
+from game.quests import conditions_satisfied, process_game_events
 from game.relationships import apply_relationship_event
 from game.rewards import grant_experience, grant_quest_rewards
 from game.turns import create_turn
@@ -58,7 +59,7 @@ class GameSessionTests(TestCase):
             },
         )
 
-        self.quest = Quest.objects.create(
+        self.missing_villagers = Quest.objects.create(
             campaign=self.campaign,
             slug="missing_villagers",
             title="The Missing Villagers",
@@ -68,7 +69,7 @@ class GameSessionTests(TestCase):
                     {
                         "type": "object_discovered",
                         "target": "notice_board",
-                        "location": "lanterns_rest",
+                        "location": "tavern",
                     }
                 ],
                 "objectives": [
@@ -89,6 +90,36 @@ class GameSessionTests(TestCase):
                     "gold": 25,
                     "items": [],
                 },
+                "outcomes": [
+                    {
+                        "id": "betrayal",
+                        "name": "Betrayal",
+                        "description": "Accept the mercenary bribe.",
+                        "status": "failed",
+                        "conditions": [
+                            {
+                                "type": "flag_changed",
+                                "flag": "accepted_mercenary_bribe",
+                                "value": True,
+                            }
+                        ],
+                        "rewards": {"gold": 150, "experience": 100},
+                        "consequences": {"flags": {"betrayed_village": True}},
+                    },
+                    {
+                        "id": "negotiated_release",
+                        "name": "Negotiated Release",
+                        "description": "Negotiate the villagers' release.",
+                        "status": "completed",
+                        "conditions": [
+                            {
+                                "type": "flag_changed",
+                                "flag": "villagers_release_negotiated",
+                                "value": True,
+                            }
+                        ],
+                    },
+                ],
             },
         )
 
@@ -112,10 +143,19 @@ class GameSessionTests(TestCase):
             },
         )
 
-        self.quest = Quest.objects.create(
+        self.followup_quest = Quest.objects.create(
             campaign=self.campaign,
-            slug="first_quest",
-            title="The First Quest",
+            slug="a_village_divided",
+            title="A Village Divided",
+            data={
+                "activation": [
+                    {
+                        "type": "quest_resolved",
+                        "quest": self.missing_villagers.slug,
+                        "outcome": "betrayal",
+                    }
+                ],
+            },
         )
 
         self.character = Character.objects.create(
@@ -165,8 +205,12 @@ class GameSessionTests(TestCase):
         self.assertEqual(  # pyright: ignore
             NPCState.objects.filter(session=session, npc=self.npc).count(), 1
         )
-        self.assertEqual(  # pyright: ignore
-            QuestState.objects.filter(session=session, quest=self.quest).count(), 1
+        self.assertCountEqual(
+            QuestState.objects.filter(session=session).values_list("quest", "status"),
+            [
+                (self.missing_villagers.pk, "hidden"),
+                (self.followup_quest.pk, "hidden"),
+            ],
         )
 
     def test_session_have_independent_npc_states(self):
@@ -475,6 +519,115 @@ class GameSessionTests(TestCase):
             ).count(),
             1,
         )
+
+    def test_betrayal_outcome(self):
+        quest = QuestState.objects.get(
+            session=self.session,
+            quest__slug="missing_villagers",
+        )
+
+        quest.status = "active"
+        quest.save(update_fields=["status"])
+
+        player = PlayerState.objects.get(session=self.session)
+
+        previous_gold = player.gold
+        previous_experience = player.experience
+
+        _updates, events = process_game_events(
+            session=self.session,  # pyright:ignore
+            events=[  # pyright:ignore
+                GameEvent(
+                    type="flag_changed",
+                    flag="accepted_mercenary_bribe",
+                    value=True,
+                )
+            ],
+        )
+
+        quest.refresh_from_db()
+        player.refresh_from_db()
+        self.session.refresh_from_db()  # pyright:ignore
+
+        self.assertEqual(quest.status, "failed")  # pyright:ignore
+        self.assertEqual(quest.outcome, "betrayal")  # pyright:ignore
+        self.assertTrue(quest.rewards_granted)
+
+        self.assertEqual(player.gold, previous_gold + 150)  # pyright:ignore
+
+        self.assertEqual(player.experience, previous_experience + 100)  # pyright:ignore
+
+        self.assertTrue(self.session.flags["betrayed_village"])  # pyright:ignore
+
+        self.assertTrue(
+            any(
+                event.type == "quest_resolved" and event.outcome == "betrayal"
+                for event in events
+            )
+        )
+
+    def test_resolved_quest_cannot_change(self):
+        quest = QuestState.objects.get(
+            session=self.session,
+            quest__slug="missing_villagers",
+        )
+
+        quest.status = "active"
+        quest.save(update_fields=["status"])
+
+        process_game_events(
+            session=self.session,  # pyright:ignore
+            events=[  # pyright:ignore
+                GameEvent(
+                    type="flag_changed",
+                    flag="accepted_mercenary_bribe",
+                    value=True,
+                )
+            ],
+        )
+
+        process_game_events(
+            session=self.session,  # pyright:ignore
+            events=[  # pyright:ignore
+                GameEvent(
+                    type="flag_changed",
+                    flag="villagers_release_negotiated",
+                    value=True,
+                )
+            ],
+        )
+
+        quest.refresh_from_db()
+
+        self.assertEqual(quest.outcome, "betrayal")  # pyright:ignore
+        self.assertEqual(quest.status, "failed")  # pyright:ignore
+
+    def test_followup_quest_activation(self):
+        quest = QuestState.objects.get(
+            session=self.session,
+            quest__slug="missing_villagers",
+        )
+
+        quest.status = "active"
+        quest.save(update_fields=["status"])
+
+        process_game_events(
+            session=self.session,  # pyright:ignore
+            events=[  # pyright:ignore
+                GameEvent(
+                    type="flag_changed",
+                    flag="accepted_mercenary_bribe",
+                    value=True,
+                )
+            ],
+        )
+
+        followup = QuestState.objects.get(
+            session=self.session,
+            quest=self.followup_quest,
+        )
+
+        self.assertEqual(followup.status, "active")  # pyright:ignore
 
 
 class AttackMechanicsTest(TestCase):
@@ -1601,3 +1754,58 @@ class ProgressionTests(SimpleTestCase):
     def test_negative_experience(self):
         with self.assertRaises(ValueError):
             get_level(-1)
+
+
+class QuestConditionTests(SimpleTestCase):
+    def setUp(self):
+        self.condition = [
+            {
+                "type": "npc_killed",
+                "npc": "mercenary_captain",
+            },
+            {
+                "type": "npc_killed",
+                "npc": "mercenary_lieutenant",
+            },
+        ]
+
+        self.events = [
+            GameEvent(
+                type="npc_killed",
+                npc="mercenary_captain",
+            ),
+        ]
+
+    def test_any_condition(self):
+        self.assertTrue(
+            conditions_satisfied(
+                self.condition,
+                self.events,
+                mode="any",
+            )
+        )
+
+    def test_all_conditions_incomplete(self):
+        self.assertFalse(
+            conditions_satisfied(
+                self.condition,
+                self.events,
+                mode="all",
+            )
+        )
+
+    def test_all_conditions_completed(self):
+        self.events.append(
+            GameEvent(
+                type="npc_killed",
+                npc="mercenary_lieutenant",
+            )
+        )
+
+        self.assertTrue(
+            conditions_satisfied(
+                self.condition,
+                self.events,
+                mode="all",
+            )
+        )

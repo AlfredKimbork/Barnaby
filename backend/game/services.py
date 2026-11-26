@@ -90,7 +90,6 @@ def create_game_session(
             QuestState(
                 session=session,
                 quest=quest,
-                status="not_started",
                 completed_objectives=[],
             )
             for quest in Quest.objects.filter(campaign=campaign).filter(

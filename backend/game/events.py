@@ -13,6 +13,9 @@ EventType = Literal[
     "flag_changed",
     "challange_succeeded",
     "challenge_failed",
+    "quest_resolved",
+    "quest_completed",
+    "quest_failed",
 ]
 
 
@@ -29,11 +32,22 @@ class GameEvent(BaseModel):
     knowledge: str | None = None
     flag: str | None = None
     value: str | bool | int | None = None
+    quest: str | None = None
+    outcome: str | None = None
 
 
 class EventCondition(GameEvent):
     def matched(self, event: GameEvent) -> bool:
         expected = self.model_dump(exclude_unset=True)
+        actual = event.model_dump()
+
+        return all(actual.get(key) == value for key, value in expected.items())
+
+    def matches(self, event: GameEvent) -> bool:
+        expected = self.model_dump(
+            exclude_none=True,
+        )
+
         actual = event.model_dump()
 
         return all(actual.get(key) == value for key, value in expected.items())

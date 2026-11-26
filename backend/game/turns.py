@@ -59,14 +59,14 @@ def create_turn(
 
     events = events or []
 
-    quest_updates = process_game_events(
-        session=session,
-        events=events,
+    quest_updates, processed_events = process_game_events(
+        session=session,  # pyright:ignore
+        events=events,  # pyright:ignore
     )
 
     mechanical_result = {
         **mechanical_result,
-        "events": [event.model_dump(mode="json") for event in events],
+        "events": [event.model_dump(mode="json") for event in processed_events],
         "quest_updates": quest_updates,
     }
 

@@ -162,9 +162,9 @@ def finalize_dialogue(
         disclosed_ids=disclosed_ids,  # pyright:ignore
     )
 
-    quest_updates = process_game_events(
-        session=session,
-        events=events,
+    quest_updates, processed_events = process_game_events(
+        session=session,  # pyright:ignore
+        events=events,  # pyright:ignore
     )
 
     result["response"] = dialogue  # pyright:ignore
@@ -172,7 +172,7 @@ def finalize_dialogue(
 
     result["events"] = [  # pyright:ignore
         *result.get("events", []),  # pyright:ignore
-        *[event.model_dump(mode="json") for event in events],
+        *[event.model_dump(mode="json") for event in processed_events],
     ]
 
     result["quest_updates"] = [  # pyright:ignore

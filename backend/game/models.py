@@ -227,6 +227,17 @@ class QuestState(models.Model):
 
     rewards_granted = models.BooleanField(default=False)  # pyright: ignore
 
+    outcome = models.SlugField(
+        max_length=150,
+        blank=True,
+        default="",
+    )
+
+    resolved_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+
     class Meta:
         constraints = (
             models.UniqueConstraint(

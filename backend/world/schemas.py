@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
@@ -164,11 +164,42 @@ class QuestObjectiveSchema(Schema):
 
     conditions: list[dict[str, Any]] = Field(default_factory=list)
 
+    condition_mode: Literal["any", "all"] = "any"
+
 
 class QuestRewardSchema(Schema):
     experience: int = Field(default=0, ge=0)
     gold: int = Field(default=0, ge=0)
     items: list[str] = Field(default_factory=list)
+
+
+class QuestConsequencesSchema(Schema):
+    flags: dict[str, bool | int | str] = Field(default_factory=dict)
+
+
+class QuestOutcomeSchema(Schema):
+    id: str
+    name: str
+    description: str
+
+    status: Literal["completed", "failed"] = "completed"
+
+    required_objectives: list[str] = Field(default_factory=list)
+
+    conditions: list[EventCondition] = Field(default_factory=list)
+
+    conditions_mode: Literal["all", "any"] = "all"
+
+    priority: int = 0
+
+    rewards: QuestRewardSchema = Field(default_factory=QuestRewardSchema)
+
+    @model_validator(mode="after")
+    def validate_requirements(self):
+        if not self.required_objectives and not self.conditions_mode:
+            raise ValidationError("Quest outcomes must have requirements.")
+
+        return self
 
 
 class QuestSchema(Schema):
@@ -182,12 +213,26 @@ class QuestSchema(Schema):
 
     rewards: QuestRewardSchema = Field(default_factory=QuestRewardSchema)
 
+    outcomes: list[QuestOutcomeSchema] = Field(default_factory=list)
+
     @model_validator(mode="after")
     def validate_objectives(self):
-        ids = [objective.id for objective in self.objectives]
+        objective_ids = {objective.id for objective in self.objectives}
+        outcome_ids = [outcome.id for outcome in self.outcomes]
 
-        if len(ids) != len(set(ids)):
+        if len(objective_ids) != len(set(objective_ids)):
             raise ValidationError(f"Duplicate objective IDs found in Quest '{self.id}'")
+
+        if len(outcome_ids) != len(set(outcome_ids)):
+            raise ValidationError(f"Duplicate outcome IDs found in Quest '{self.id}'")
+
+        for outcome in self.outcomes:
+            unknown = set(outcome.required_objectives) - objective_ids
+
+            if unknown:
+                raise ValidationError(
+                    f"Outcome {outcome.id} references unknown objectives: {unknown}"
+                )
 
         graph = {objective.id: objective.prerequisites for objective in self.objectives}
 
@@ -214,7 +259,7 @@ class QuestSchema(Schema):
             visiting.remove(objective_id)
             visited.add(objective_id)
 
-        for objective_id in ids:
+        for objective_id in objective_ids:
             visit(objective_id)
 
         return self
