@@ -193,6 +193,17 @@ class NPCCombatBehaviorSchema(Schema):
     can_surrender: bool = True
 
 
+class NPCReinforcementSchema(Schema):
+    faction: str | None = None
+
+    assists_faction: bool = False
+
+    arrival_delay: int = Field(
+        default=1,
+        ge=1,
+    )
+
+
 class NPCCombatSchema(Schema):
     initiative_modifier: int = 0
 
@@ -202,6 +213,10 @@ class NPCCombatSchema(Schema):
 
     behavior: NPCCombatBehaviorSchema = Field(
         default_factory=NPCCombatBehaviorSchema,
+    )
+
+    reinforcement: NPCReinforcementSchema = Field(
+        default_factory=NPCReinforcementSchema
     )
 
 

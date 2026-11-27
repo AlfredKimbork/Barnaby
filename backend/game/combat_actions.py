@@ -17,6 +17,7 @@ from game.combat import (
     get_current_participant,
     get_npc_combat_events,
     process_npc_turns,
+    retreat_companions,
 )
 from game.events import GameEvent
 from game.models import (
@@ -96,6 +97,7 @@ def resolve_flee(
         "round": encounter.round_number,
         "success": check.success,
         "destination": destination.slug,
+        "escaped_companions": [],
         "check": asdict(check),
     }
 
@@ -105,6 +107,11 @@ def resolve_flee(
         participant.withdrawn = True  # pyright: ignore
 
         participant.save(update_fields=["withdrawn"])
+
+        result["escaped_companions"] = retreat_companions(
+            encounter=encounter,
+            destination=destination,
+        )
 
         end_encounter(
             encounter=encounter,

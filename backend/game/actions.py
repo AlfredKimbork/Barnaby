@@ -10,6 +10,7 @@ from game.combat import (
     get_active_combat,
     get_combat_context,
     get_combat_end_events,
+    get_npc_combat_events,
     process_npc_turns,
     require_outside_combat,
     resolve_player_attack,
@@ -113,6 +114,41 @@ def process_attack(
 
     encounter = get_active_combat(session)
 
+    betrayed_companion = False
+
+    if target.is_recruited:
+        if encounter is not None:
+            raise ValidationError(
+                "Cannot attack a companion during an active encounter."
+            )
+
+        target.state = {
+            **target.state,
+            "recruited": False,
+        }
+
+        target.trust = -100
+        target.hostility = 100
+
+        target.save(
+            update_fields=[
+                "state",
+                "trust",
+                "hostility",
+            ]
+        )
+
+        betrayed_companion = True
+
+        events.append(
+            GameEvent(
+                type="companion_betrayed",
+                target=target_slug,
+                npc=target_slug,
+                location=session.current_location.slug,  # pyright: ignore
+            )
+        )
+
     combat_started = encounter is None
 
     if encounter is None:
@@ -202,6 +238,13 @@ def process_attack(
         status=encounter.status,
     )
 
+    events.extend(
+        get_npc_combat_events(
+            encounter=encounter,
+            actions=combat_action,
+        )
+    )
+
     turn = create_turn(
         session=session,  # pyright: ignore
         action_id=action_id,  # pyright: ignore
@@ -231,6 +274,7 @@ def process_attack(
             ),
             "combat": get_combat_context(session),
             "target_available": target_available,
+            "betrayed_companion": betrayed_companion,
         },
         events=events + get_combat_end_events(encounter),  # pyright: ignore
     )

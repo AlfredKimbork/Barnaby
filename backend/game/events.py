@@ -27,6 +27,11 @@ EventType = Literal[
     "npc_recruited",
     "npc_dismissed",
     "recruitment_failed",
+    "companion_killed",
+    "companion_fled",
+    "companion_surrendered",
+    "combat_reinforcement_joined",
+    "companion_betrayed",
 ]
 
 

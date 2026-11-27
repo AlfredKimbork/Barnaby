@@ -19,9 +19,12 @@ from game.combat import (
     get_combat_defense,
     get_current_participant,
     get_npc_combat_events,
+    join_combat,
+    resolve_npc_attack,
     resolve_npc_defend,
     resolve_npc_flee,
     resolve_npc_surrender,
+    retreat_companions,
     start_combat,
 )
 from game.combat_actions import process_combat_action
@@ -46,6 +49,7 @@ from game.models import (
     CombatEncounter,
     CombatParticipant,
     CombatStatus,
+    CombatTeam,
     GameTurn,
     KnowledgeDiscovery,
     NPCState,
@@ -1722,6 +1726,384 @@ class GameSessionTests(TestCase):
                 action="recruit",  # pyright: ignore
                 target_slug=self.npc.slug,  # pyright: ignore
             )
+
+    def create_test_companion(self):
+        npc = NPC.objects.create(
+            campaign=self.session.campaign,  # pyright: ignore
+            slug="test_companion",
+            name="Test Companion",
+            starting_location=self.session.current_location,  # pyright: ignore
+            data={
+                "combat": {
+                    "initiative_modifier": 0,
+                    "attacks": [
+                        {
+                            "id": "sword",
+                            "name": "Sword",
+                            "attack_bonus": 3,
+                            "damage_modifier": 2,
+                            "damage_dice": "1d6",
+                        }
+                    ],
+                },
+            },
+        )
+
+        return NPCState.objects.create(
+            session=self.session,  # pyright: ignore
+            npc=npc,
+            current_location=(self.session.current_location),  # pyright: ignore
+            hp=16,
+            max_hp=16,
+            alive=True,
+            trust=50,
+            hostility=0,
+            state={
+                "recruited": True,
+                "defense": 12,
+            },
+        )
+
+    def test_companion_joins_combat(self):
+        companion = self.create_test_companion()
+
+        encounter = start_combat(  # pyright: ignore
+            session=self.session,  # pyright: ignore
+            enemies=[self.npc_state],  # pyright: ignore
+        )
+
+        participant = CombatParticipant.objects.get(
+            encounter=encounter,
+            npc=companion,
+        )
+
+        self.assertEqual(  # pyright: ignore
+            participant.team,
+            CombatTeam.ALLY,
+        )
+
+        self.assertEqual(  # pyright: ignore
+            encounter.participants.count(),  # pyright: ignore
+            3,
+        )
+
+    @patch(
+        "game.checks.randint",
+        return_value=20,
+    )
+    @patch(
+        "game.mechanics.randint",
+        return_value=3,
+    )
+    def test_companion_attacks_enemy(
+        self,
+        mock_damage,
+        mock_roll,
+    ):
+        companion = self.create_test_companion()
+
+        encounter = start_combat(
+            session=self.session,  # pyright: ignore
+            enemies=[self.npc_state],  # pyright: ignore
+        )
+
+        attacker = CombatParticipant.objects.get(
+            encounter=encounter,
+            npc=companion,
+        )
+
+        target = CombatParticipant.objects.get(
+            encounter=encounter,  # pyright: ignore
+            npc=self.npc_state,  # pyright: ignore
+        )
+
+        encounter.turn_index = attacker.position  # pyright: ignore
+
+        encounter.save(update_fields=["turn_index"])  # pyright: ignore
+
+        previous_hp = self.npc_state.hp  # pyright: ignore
+
+        result = resolve_npc_attack(
+            encounter=encounter,  # pyright: ignore
+            participant=attacker,
+            target=target,
+        )
+
+        self.npc_state.refresh_from_db()  # pyright: ignore
+
+        self.assertEqual(  # pyright: ignore
+            result["attacker_team"],
+            CombatTeam.ALLY,
+        )
+
+        self.assertEqual(  # pyright: ignore
+            result["target"],
+            self.npc.slug,  # pyright: ignore
+        )
+
+        self.assertLess(
+            self.npc_state.hp,  # pyright: ignore
+            previous_hp,
+        )
+
+    @patch(
+        "game.checks.randint",
+        return_value=20,
+    )
+    @patch(
+        "game.mechanics.randint",
+        return_value=2,
+    )
+    def test_enemy_attacks_companion(
+        self,
+        mock_damage,
+        mock_roll,
+    ):
+        companion = self.create_test_companion()
+
+        encounter = start_combat(
+            session=self.session,  # pyright: ignore
+            enemies=[self.npc_state],  # pyright: ignore
+        )
+
+        attacker = CombatParticipant.objects.get(
+            encounter=encounter,
+            npc=self.npc_state,  # pyright: ignore
+        )
+
+        target = CombatParticipant.objects.get(
+            encounter=encounter,
+            npc=companion,
+        )
+
+        encounter.turn_index = attacker.position  # pyright: ignore
+
+        encounter.save(update_fields=["turn_index"])  # pyright: ignore
+
+        previous_hp = companion.hp
+
+        result = resolve_npc_attack(
+            encounter=encounter,  # pyright: ignore
+            participant=attacker,
+            target=target,
+        )
+
+        companion.refresh_from_db()
+
+        self.assertEqual(  # pyright: ignore
+            result["target"],
+            companion.npc.slug,
+        )
+
+        self.assertLess(
+            companion.hp,
+            previous_hp,
+        )
+
+    @patch(
+        "game.checks.randint",
+        return_value=20,
+    )
+    @patch(
+        "game.mechanics.randint",
+        return_value=2,
+    )
+    def test_companion_death(
+        self,
+        mock_damage,
+        mock_roll,
+    ):
+        companion = self.create_test_companion()
+
+        companion.hp = 1
+        companion.save(update_fields=["hp"])
+
+        encounter = start_combat(
+            session=self.session,  # pyright: ignore
+            enemies=[self.npc_state],  # pyright: ignore
+        )
+
+        attacker = CombatParticipant.objects.get(
+            encounter=encounter,
+            npc=self.npc_state,  # pyright: ignore
+        )
+
+        target = CombatParticipant.objects.get(
+            encounter=encounter,
+            npc=companion,
+        )
+
+        encounter.turn_index = attacker.position  # pyright: ignore
+
+        encounter.save(update_fields=["turn_index"])  # pyright: ignore
+
+        result = resolve_npc_attack(
+            encounter=encounter,  # pyright: ignore
+            participant=attacker,
+            target=target,
+        )
+
+        companion.refresh_from_db()
+
+        self.assertFalse(companion.alive)  # pyright: ignore
+        self.assertEqual(companion.hp, 0)  # pyright: ignore
+
+        events = get_npc_combat_events(
+            encounter=encounter,  # pyright: ignore
+            actions=[result],
+        )
+
+        self.assertIn(
+            "companion_killed",
+            {event.type for event in events},
+        )
+
+    def test_companion_retreats_with_player(self):
+        companion = self.create_test_companion()
+
+        encounter = start_combat(
+            session=self.session,  # pyright: ignore
+            enemies=[self.npc_state],  # pyright: ignore
+        )
+
+        destination_slug = self.session.current_location.data["connections"][0]  # pyright: ignore
+
+        destination = Location.objects.get(
+            campaign=self.session.campaign,  # pyright: ignore
+            slug=destination_slug,
+        )
+
+        escaped = retreat_companions(
+            encounter=encounter,  # pyright: ignore
+            destination=destination,
+        )
+
+        companion.refresh_from_db()
+
+        participant = CombatParticipant.objects.get(
+            encounter=encounter,
+            npc=companion,
+        )
+
+        self.assertEqual(  # pyright: ignore
+            companion.current_location,
+            destination,
+        )
+
+        self.assertTrue(participant.withdrawn)
+
+        self.assertIn(
+            companion.npc.slug,
+            escaped,
+        )
+
+    def test_reinforcement_joins_next_round(self):
+        reinforcement = self.create_test_companion()
+
+        reinforcement.state = {
+            **reinforcement.state,
+            "recruited": False,
+        }
+
+        reinforcement.save(update_fields=["state"])
+
+        encounter = start_combat(
+            session=self.session,  # pyright: ignore
+            enemies=[self.npc_state],  # pyright: ignore
+        )
+
+        previous_count = encounter.participants.count()  # pyright: ignore
+
+        participant = join_combat(
+            encounter=encounter,  # pyright: ignore
+            npc=reinforcement,  # pyright: ignore
+            team=CombatTeam.ENEMY,  # pyright: ignore
+        )
+
+        self.assertEqual(  # pyright: ignore
+            participant.position,  # pyright: ignore
+            previous_count,
+        )
+
+        self.assertEqual(  # pyright: ignore
+            participant.state["eligible_round"],  # pyright: ignore
+            encounter.round_number + 1,  # pyright: ignore
+        )
+
+        self.assertEqual(  # pyright: ignore
+            encounter.participants.count(),  # pyright: ignore
+            previous_count + 1,
+        )
+
+    @patch(
+        "game.checks.randint",
+        side_effect=[20, 1, 10],
+    )
+    def test_reinforcement_skips_arrival_round(
+        self,
+        mock_roll,
+    ):
+        reinforcement = self.create_test_companion()
+
+        reinforcement.state = {
+            **reinforcement.state,
+            "recruited": False,
+        }
+
+        reinforcement.save(update_fields=["state"])
+
+        encounter = start_combat(
+            session=self.session,  # pyright: ignore
+            enemies=[self.npc_state],  # pyright: ignore
+        )
+
+        participant = join_combat(
+            encounter=encounter,  # pyright: ignore
+            npc=reinforcement,  # pyright: ignore
+            team=CombatTeam.ENEMY,  # pyright: ignore
+        )
+
+        encounter.turn_index = participant.position - 1  # pyright: ignore
+
+        encounter.save(update_fields=["turn_index"])  # pyright: ignore
+
+        next_participant = advance_combat_turn(encounter)  # pyright: ignore
+
+        self.assertEqual(  # pyright: ignore
+            encounter.round_number,  # pyright: ignore
+            2,
+        )
+
+        self.assertNotEqual(
+            next_participant.pk,  # pyright: ignore
+            participant.pk,  # pyright: ignore
+        )
+
+    def test_reinforcement_cannot_join_twice(self):
+        reinforcement = self.create_test_companion()
+
+        reinforcement.state = {
+            **reinforcement.state,
+            "recruited": False,
+        }
+
+        reinforcement.save(update_fields=["state"])
+
+        encounter = start_combat(
+            session=self.session,  # pyright: ignore
+            enemies=[self.npc_state],  # pyright: ignore
+        )
+
+        kwargs = {
+            "encounter": encounter,
+            "npc": reinforcement,
+            "team": CombatTeam.ENEMY,
+        }
+
+        join_combat(**kwargs)
+
+        with self.assertRaises(ValidationError):
+            join_combat(**kwargs)
 
 
 class AttackMechanicsTest(TestCase):

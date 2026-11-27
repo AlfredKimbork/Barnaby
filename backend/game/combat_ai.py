@@ -87,6 +87,72 @@ def get_health_ratio(participant: CombatParticipant) -> float:
     return actor.hp / actor.max_hp  # pyright: ignore
 
 
+def get_opposing_participants(
+    *,
+    encounter: CombatEncounter,
+    participant: CombatParticipant,
+) -> list[CombatParticipant]:
+    opposing_teams = (
+        [CombatTeam.PLAYER, CombatTeam.ALLY]
+        if participant.team == CombatTeam.ENEMY
+        else [CombatTeam.ENEMY]
+    )
+
+    participants = (
+        CombatParticipant.objects.filter(
+            encounter=encounter,
+            team__in=opposing_teams,
+            withdrawn=False,
+        )
+        .select_related("player", "npc", "npc__npc")
+        .order_by("position")
+    )
+
+    return [target for target in participants if target.can_act]
+
+
+def select_combat_target(
+    *, encounter: CombatEncounter, participant: CombatParticipant
+) -> CombatParticipant | None:
+    candidates = get_opposing_participants(
+        encounter=encounter,
+        participant=participant,
+    )
+
+    if not candidates:
+        return None
+
+    behaviour = get_behavior(participant)
+    style = behaviour["style"]
+
+    if style == "aggresive":
+        return min(
+            candidates,
+            key=lambda target: (
+                get_health_ratio(target),
+                target.position,
+            ),
+        )
+
+    if style == "protective":
+        return min(
+            candidates,
+            key=lambda target: (
+                -target.initiative_modifier,  # pyright: ignore
+                target.position,
+            ),
+        )
+
+    return min(
+        candidates,
+        key=lambda target: (
+            target.defending,
+            get_health_ratio(target),
+            target.position,
+        ),
+    )
+
+
 def can_defend(
     *,
     encounter: CombatEncounter,

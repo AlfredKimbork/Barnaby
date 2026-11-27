@@ -2,10 +2,11 @@ from dataclasses import asdict
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import Max
 from django.utils import timezone
 
 from game.checks import roll_d20
-from game.combat_ai import choose_npc_action
+from game.combat_ai import choose_npc_action, select_combat_target
 from game.events import GameEvent
 from game.mechanics import (
     get_npc_defense,
@@ -81,6 +82,20 @@ def start_combat(*, session: GameSession, enemies: list[NPCState]) -> CombatEnco
     if len(enemies) != len(enemy_ids):
         raise ValidationError("Some enemies are not valid for this session.")
 
+    companions = list(
+        NPCState.objects.select_for_update()
+        .filter(
+            session=session,
+            current_location=session.current_location,
+            state__recruited=True,
+            alive=True,
+            hp__gt=0,
+        )
+        .exclude(pk__in=enemy_ids)
+        .select_related("npc")
+        .order_by("pk")
+    )
+
     encounter = CombatEncounter.objects.create(
         session=session,
         location=session.current_location,
@@ -111,6 +126,22 @@ def start_combat(*, session: GameSession, enemies: list[NPCState]) -> CombatEnco
                 encounter=encounter,
                 npc=enemy,
                 team=CombatTeam.ENEMY,
+                initiative=initiative.total,
+                initiative_modifier=initiative.modifier,
+                position=0,
+            )
+        )
+
+    for companion in companions:
+        combat = companion.npc.data.get("combat", {})
+
+        initiative = roll_initiative(combat.get("initiative_modifier", 0))
+
+        participants.append(
+            CombatParticipant(
+                encounter=encounter,
+                npc=companion,
+                team=CombatTeam.ALLY,
                 initiative=initiative.total,
                 initiative_modifier=initiative.modifier,
                 position=0,
@@ -282,59 +313,113 @@ def resolve_npc_attack(
     *,
     encounter: CombatEncounter,
     participant: CombatParticipant,
+    target: CombatParticipant | None = None,
 ) -> dict:
     if participant.npc is None:
         raise ValidationError("Combat participant is not an NPC.")
 
-    if participant.team != CombatTeam.ENEMY:
-        raise ValidationError("Combat participant is not an enemy.")
+    if participant.encounter_id != encounter.pk:  # pyright: ignore
+        raise ValidationError("Invalid combat participant.")
 
     if participant.position != encounter.turn_index:
-        raise ValidationError("Combat participant is not the current turn.")
+        raise ValidationError("It is not this participant's turn.")
 
-    npc = NPCState.objects.select_for_update().get(id=participant.npc_id)  # pyright: ignore
+    if not participant.can_act:
+        raise ValidationError("Participant cannot attack.")
 
-    player = PlayerState.objects.select_for_update().get(session=encounter.session)
+    if target is None:
+        target = select_combat_target(
+            encounter=encounter,
+            participant=participant,
+        )
+
+    if target is None:
+        raise ValidationError("No valid combat target.")
+
+    if target.encounter_id != encounter.pk:  # pyright: ignore
+        raise ValidationError("Target belongs to another encounter.")
+
+    opposing_teams = (
+        {CombatTeam.PLAYER, CombatTeam.ALLY}
+        if participant.team == CombatTeam.ENEMY
+        else {CombatTeam.ENEMY}
+    )
+
+    if target.team not in opposing_teams:
+        raise ValidationError("Target is not an opponent.")
+
+    if not target.can_act:
+        raise ValidationError("Target cannot be attacked.")
+
+    npc = NPCState.objects.select_for_update().get(pk=participant.npc_id)  # pyright: ignore
 
     if not npc.alive or npc.hp <= 0:
-        raise ValidationError("NPC is dead and cannot attack.")
-
-    if player.hp <= 0:
-        raise ValidationError("Player is dead and cannot be attacked.")
+        raise ValidationError("Dead NPCs cannot attack.")
 
     attack = select_npc_attack(npc)
 
-    player_participant = CombatParticipant.objects.select_related("player").get(
-        encounter=encounter,
-        player=player,
-    )
+    if target.is_player:
+        actor = PlayerState.objects.select_for_update().get(pk=target.player_id)  # pyright: ignore
+
+        target.player = actor
+
+        target_slug = "player"
+        target_name = "you"
+
+    elif target.npc is not None:
+        actor = NPCState.objects.select_for_update().get(pk=target.npc_id)  # pyright: ignore
+
+        target.npc = actor
+
+        target_slug = actor.npc.slug
+        target_name = actor.npc.name
+
+    else:
+        raise ValidationError("Target has no actor.")
+
+    if not target.can_act:
+        raise ValidationError("Target is no longer available.")
 
     result = resolve_combat_attack(
         attack_modifier=attack.get("attack_bonus", 0),
         damage_modifier=attack.get("damage_modifier", 0),
         damage_dice=attack["damage_dice"],
-        defense=get_combat_defense(player_participant),
+        defense=get_combat_defense(target),
     )
 
-    previous_hp = player.hp
+    previous_hp = actor.hp
 
     if result.hit:
-        player.take_damage(result.damage)
+        if isinstance(actor, PlayerState):
+            actor.take_damage(result.damage)
 
-    player.refresh_from_db()
+        else:
+            actor.hp = max(
+                0,
+                actor.hp - result.damage,
+            )
+
+            actor.alive = actor.hp > 0
+
+            actor.save(update_fields=["hp", "alive"])
+
+    actor.refresh_from_db()
 
     return {
         "type": "npc_attack",
         "round": encounter.round_number,
         "attacker": npc.npc.slug,
         "attacker_name": npc.npc.name,
-        "target": "player",
+        "attacker_team": participant.team,
+        "target": target_slug,
+        "target_name": target_name,
+        "target_team": target.team,
         "weapon": attack["id"],
         "weapon_name": attack["name"],
         "attack_result": asdict(result),
-        "damage_applied": previous_hp - player.hp,
-        "target_remaining_hp": player.hp,
-        "target_alive": player.hp > 0,
+        "damage_applied": previous_hp - actor.hp,
+        "target_remaining_hp": actor.hp,
+        "target_alive": actor.hp > 0,
     }
 
 
@@ -361,7 +446,7 @@ def resolve_npc_defend(
     return {
         "type": "npc_defend",
         "round": encounter.round_number,
-        "actor": participant.pk,
+        "actor": participant.npc.npc.slug,  # pyright: ignore
         "actor_name": participant.npc.npc.name,  # pyright: ignore
         "defense_bonus": DEFENDING_BONUS,
     }
@@ -482,6 +567,103 @@ def resolve_npc_flee(
     }
 
 
+def get_reinforcement_config(
+    npc: NPCState,
+) -> dict:
+    return npc.npc.data.get("combat", {}).get("reinforcement", {})  # pyright: ignore
+
+
+def process_reinforcements(
+    *,
+    encounter: CombatEncounter,
+) -> list[dict]:
+    if encounter.status != CombatStatus.ACTIVE:
+        return []
+
+    participants = list(
+        CombatParticipant.objects.filter(encounter=encounter).select_related(
+            "npc", "npc__npc"
+        )
+    )
+
+    existing_ids = {
+        participant.npc_id
+        for participant in participants
+        if participant.npc_id is not None
+    }
+
+    enemy_factions = set()
+
+    for participant in participants:
+        if participant.team != CombatTeam.ENEMY:
+            continue
+
+        if not participant.can_act:
+            continue
+
+        if participant.npc is None:
+            continue
+
+        faction = get_reinforcement_config(participant.npc).get("faction")
+
+        if faction:
+            enemy_factions.add(faction)
+
+    if not enemy_factions:
+        return []
+
+    candidates = (
+        NPCState.objects.select_for_update()
+        .filter(
+            session=encounter.session,
+            current_location=encounter.location,
+            alive=True,
+            hp__gt=0,
+        )
+        .exclude(pk__in=existing_ids)
+        .select_related("npc")
+        .order_by("pk")
+    )
+
+    actions: list[dict] = []
+
+    for npc in candidates:
+        if npc.state.get("recruited", False):
+            continue
+
+        config = get_reinforcement_config(npc)
+
+        if not config.get("assists_faction", False):
+            continue
+
+        if config.get("faction") not in enemy_factions:
+            continue
+
+        arrival_round = 1 + config.get("arrival_delay", 1)
+
+        if encounter.round_number < arrival_round:
+            continue
+
+        participant = join_combat(
+            encounter=encounter,  # pyright: ignore
+            npc=npc,  # pyright: ignore
+            team=CombatTeam.ENEMY,  # pyright: ignore
+        )
+
+        actions.append(
+            {
+                "type": "reinforcement_joined",
+                "round": encounter.round_number,
+                "actor": npc.npc.slug,
+                "actor_name": npc.npc.name,
+                "actor_team": participant.team,  # pyright: ignore
+                "eligible_round": (participant.state["eligible_round"]),  # pyright: ignore
+            }
+        )
+
+    return actions
+
+
 def resolve_npc_turn(
     *,
     encounter: CombatEncounter,
@@ -519,14 +701,33 @@ def resolve_npc_turn(
 
     return {
         **result,  # pyright: ignore
+        "actor_team": participant.team,
         "decision_reason": decision.reason,
     }
 
 
-def process_npc_turns(*, encounter: CombatEncounter) -> list[dict]:
+def process_npc_turns(
+    *,
+    encounter: CombatEncounter,
+) -> list[dict]:
     actions: list[dict] = []
 
     while encounter.status == CombatStatus.ACTIVE:
+        status = evaluate_combat_status(encounter)
+
+        if status != CombatStatus.ACTIVE:
+            end_encounter(
+                encounter=encounter,
+                status=status,
+            )
+            break
+
+        actions.extend(
+            process_reinforcements(
+                encounter=encounter,
+            )
+        )
+
         participant = get_current_participant(encounter)
 
         if participant is None:
@@ -539,21 +740,12 @@ def process_npc_turns(*, encounter: CombatEncounter) -> list[dict]:
         if participant.is_player:
             break
 
-        if participant.team == CombatTeam.ENEMY:
-            result = resolve_npc_turn(
+        actions.append(
+            resolve_npc_turn(
                 encounter=encounter,
                 participant=participant,
             )
-            actions.append(result)
-
-        else:
-            actions.append(
-                {
-                    "type": "skip",
-                    "round": encounter.round_number,
-                    "participant": participant.pk,
-                }
-            )
+        )
 
         advance_combat_turn(encounter)
 
@@ -571,10 +763,16 @@ def get_npc_combat_events(
         action_type = action["type"]
 
         if action_type == "npc_surrender":
+            event_type = (
+                "companion_surrendered"
+                if action.get("actor_team") == CombatTeam.ALLY
+                else "npc_surrendered"
+            )
+
             events.append(
                 GameEvent(
-                    type="npc_surrendered",
-                    encounter=encounter.pk,  # pyright: ignore
+                    type=event_type,
+                    encounter=encounter.pk,
                     target=action["actor"],
                     npc=action["actor"],
                     location=encounter.location.slug,  # pyright: ignore
@@ -582,14 +780,58 @@ def get_npc_combat_events(
             )
 
         elif action_type == "npc_flee" and action["success"]:
+            event_type = (
+                "companion_fled"
+                if action.get("actor_team") == CombatTeam.ALLY
+                else "npc_fled"
+            )
+
             events.append(
                 GameEvent(
-                    type="npc_fled",
-                    encounter=encounter.pk,  # pyright: ignore
+                    type=event_type,
+                    encounter=encounter.pk,
                     target=action["actor"],
                     npc=action["actor"],
                     location=encounter.location.slug,  # pyright: ignore
                     value=action["destination"],
+                )
+            )
+
+        elif (
+            action_type == "npc_attack"
+            and not action["target_alive"]
+            and action["target"] != "player"
+        ):
+            events.append(
+                GameEvent(
+                    type="npc_killed",
+                    encounter=encounter.pk,
+                    target=action["target"],
+                    npc=action["target"],
+                    location=encounter.location.slug,  # pyright: ignore
+                )
+            )
+
+            if action["target_team"] == CombatTeam.ALLY:
+                events.append(
+                    GameEvent(
+                        type="companion_killed",
+                        encounter=encounter.pk,
+                        target=action["target"],
+                        npc=action["target"],
+                        location=encounter.location.slug,  # pyright: ignore
+                    )
+                )
+
+        elif action_type == "reinforcement_joined":
+            events.append(
+                GameEvent(
+                    type="combat_reinforcement_joined",
+                    encounter=encounter.pk,
+                    target=action["actor"],
+                    npc=action["actor"],
+                    location=encounter.location.slug,  # pyright: ignore
+                    value=action["actor_team"],
                 )
             )
 
@@ -708,6 +950,10 @@ def build_combat_narration(
     lines: list[str] = []
 
     for action in actions:
+        if action["type"] == "reinforcemt_joined":
+            lines.append(f"{action['actor_name']} joins the combat as a reinforcement.")
+            continue
+
         if action["type"] == "npc_defend":
             lines.append(f"{action['actor_name']} takes a defensive stance.")
             continue
@@ -732,8 +978,12 @@ def build_combat_narration(
             if action["success"]:
                 lines.append("You successfully flee from combat.")
 
+                if action.get("escaped_companions"):
+                    lines.append("Your companions escape the encounter with you.")
+
             else:
                 lines.append("You attempt to flee from combat, but fail.")
+
             continue
 
         if action["type"] == "player_surrender":
@@ -746,7 +996,7 @@ def build_combat_narration(
 
         elif action["type"] == "npc_attack":
             attacker = action["attacker_name"]
-            target = "you"
+            target = action["target_name"]
 
         else:
             continue
@@ -833,6 +1083,11 @@ def advance_combat_turn(
         if not participant.can_act:
             continue
 
+        eligible_round = participant.state.get("eligible_round", 1)
+
+        if encounter.round_number < eligible_round:
+            continue
+
         if participant.defending:
             participant.defending = False
             participant.save(update_fields=["defending"])
@@ -847,3 +1102,118 @@ def advance_combat_turn(
         return participant
 
     raise RuntimeError("No participants can act in this encounter.")
+
+
+def retreat_companions(
+    *,
+    encounter: CombatEncounter,
+    destination: Location,
+) -> list[str]:
+    participants = (
+        CombatParticipant.objects.filter(
+            encounter=encounter,
+            team=CombatTeam.ALLY,
+            withdrawn=False,
+        )
+        .select_related("npc", "npc__npc")
+        .order_by("position")
+    )
+
+    escaped: list[str] = []
+
+    for participant in participants:
+        if not participant.can_act:
+            continue
+
+        if participant.npc is None:
+            continue
+
+        npc = participant.npc
+
+        if npc.current_location_id != encounter.location_id:  #  pyright: ignore
+            continue
+
+        npc.current_location = destination
+
+        npc.save(update_fields=["current_location"])
+
+        participant.withdrawn = True
+        participant.defending = False
+
+        participant.state = {
+            **participant.state,
+            "withdrawal_reason": "party_escaped",
+        }
+
+        participant.save(
+            update_fields=[
+                "withdrawn",
+                "defending",
+                "state",
+            ]
+        )
+
+        escaped.append(npc.npc.slug)
+
+    return escaped
+
+
+@transaction.atomic
+def join_combat(
+    *,
+    encounter: CombatEncounter,
+    npc: NPCState,
+    team: CombatTeam,
+) -> CombatParticipant:
+    encounter = CombatEncounter.objects.select_for_update().get(pk=encounter.pk)
+
+    if encounter.status != CombatStatus.ACTIVE:
+        raise ValidationError("Cannot join a combat encounter that is not active.")
+
+    if team not in {
+        CombatTeam.ALLY,
+        CombatTeam.ENEMY,
+    }:
+        raise ValidationError("Invalid team for joining combat.")
+
+    npc = NPCState.objects.select_for_update().get(pk=npc.pk)
+
+    if npc.session_id != encounter.session_id:  # pyright: ignore
+        raise ValidationError(
+            "NPC does not belong to the same session as the encounter."
+        )
+
+    if npc.current_location_id != encounter.location_id:  # pyright: ignore
+        raise ValidationError("NPC is not in the same location as the encounter.")
+
+    if not npc.alive or npc.hp <= 0:
+        raise ValidationError("Dead NPCs cannot join combat.")
+
+    if CombatParticipant.objects.filter(
+        encounter=encounter,
+        npc=npc,
+    ).exists():
+        raise ValidationError("NPC is already participating in this encounter.")
+
+    last_position = CombatParticipant.objects.filter(encounter=encounter).aggregate(
+        last=Max("position")
+    )["last"]
+
+    position = 0 if last_position is None else last_position + 1
+
+    combat = npc.npc.data.get("combat", {})  # pyright: ignore
+
+    initiative = roll_initiative(combat.get("initiative_modifier", 0))
+
+    return CombatParticipant.objects.create(
+        encounter=encounter,
+        npc=npc,
+        team=team,
+        initiative=initiative.total,
+        initiative_modifier=initiative.modifier,
+        position=position,
+        state={
+            "joined_combat_round": encounter.round_number,
+            "eligible_round": encounter.round_number + 1,  # pyright: ignore
+        },
+    )
