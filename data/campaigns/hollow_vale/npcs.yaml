@@ -90,6 +90,13 @@ npcs:
             damage_dice: "1d4"
             damage_type: bludgeoning
 
+        behaviour:
+          style: balanced
+          defend_threshold: 0.4
+          surrender_threshold: 0.2
+          can_flee: false
+          defend_cooldown: 2
+
     dialogue_examples:
       greeting: "You look soaked. Sit down before you freeze."
       disappearances: "People have been going missing. That's all you need to know."
@@ -177,6 +184,10 @@ npcs:
             damage_modifier: 0
             damage_dice: "1d2"
             damage_type: bludgeoning
+        behaviour:
+          style: cowardly
+          surrender_threshold: 0.7
+          can_flee: false
 
     dialogue_examples:
       greeting: "Welcome to Hollowmere. I hope your stay is brief."
@@ -254,6 +265,12 @@ npcs:
             damage_modifier: 3
             damage_dice: "1d6"
             damage_type: piercing
+
+        behaviour:
+          style: cautious
+          defend_threshold: 0.5
+          flee_threshold: 0.25
+          defend_cooldown: 2
 
     dialogue_examples:
       greeting: "If you're heading into the forest, turn around."
@@ -334,6 +351,10 @@ npcs:
             damage_modifier: 0
             damage_dice: "1d2"
             damage_type: bludgeoning
+        behaviour:
+          style: protective
+          surrender_threshold: 0.25
+          defend_threshold: 0.6
 
     dialogue_examples:
       greeting: "May the light guide you, traveler."
@@ -410,6 +431,10 @@ npcs:
             damage_modifier: 2
             damage_dice: "2d6"
             damage_type: psychic
+        behaviour:
+          style: aggressive
+          can_flee: false
+          can_surrender: false
 
     dialogue_examples:
       greeting: "You carry so many moments within you."

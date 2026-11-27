@@ -15,6 +15,7 @@ from game.combat import (
     get_combat_context,
     get_combat_end_events,
     get_current_participant,
+    get_npc_combat_events,
     process_npc_turns,
 )
 from game.events import GameEvent
@@ -258,7 +259,17 @@ def process_combat_action(
 
             combat_actions.extend(process_npc_turns(encounter=encounter))
 
-    events.extend(get_combat_end_events(encounter=encounter))
+    events.extend(
+        get_npc_combat_events(
+            encounter=encounter,
+            actions=combat_actions,
+        )
+    )
+    events.extend(
+        get_combat_end_events(
+            encounter=encounter,
+        )
+    )
 
     player.refresh_from_db()
 

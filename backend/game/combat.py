@@ -4,6 +4,8 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 
+from game.checks import roll_d20
+from game.combat_ai import choose_npc_action
 from game.events import GameEvent
 from game.mechanics import (
     get_npc_defense,
@@ -21,6 +23,7 @@ from game.models import (
     NPCState,
     PlayerState,
 )
+from world.models import Location
 
 DEFENDING_BONUS = 2
 DEFAULT_NPC_ATTACK = {
@@ -31,6 +34,8 @@ DEFAULT_NPC_ATTACK = {
     "damage_dice": "1d2",
     "damage_type": "bludgeoning",
 }
+
+NPC_FLEE_DIFFICULTY = 12
 
 
 def get_active_combat(session: GameSession) -> CombatEncounter | None:
@@ -333,6 +338,191 @@ def resolve_npc_attack(
     }
 
 
+def resolve_npc_defend(
+    *, encounter: CombatEncounter, participant: CombatParticipant
+) -> dict:
+    if participant.npc is None:
+        raise ValidationError("Combat participant is not an NPC.")
+
+    participant.defending = True  # pyright: ignore
+
+    participant.state = {  # pyright: ignore
+        **participant.state,  # pyright: ignore
+        "last_defended_round": (encounter.round_number),
+    }
+
+    participant.save(
+        update_fields=[
+            "defending",
+            "state",
+        ]
+    )
+
+    return {
+        "type": "npc_defend",
+        "round": encounter.round_number,
+        "actor": participant.pk,
+        "actor_name": participant.npc.npc.name,  # pyright: ignore
+        "defense_bonus": DEFENDING_BONUS,
+    }
+
+
+def resolve_npc_surrender(
+    *,
+    encounter: CombatEncounter,
+    participant: CombatParticipant,
+) -> dict:
+    if participant.npc is None:
+        raise ValidationError("Combat participant is not an NPC.")
+
+    participant.withdrawn = True  # pyright: ignore
+    participant.defending = False  # pyright: ignore
+
+    participant.state = {  # pyright: ignore
+        **participant.state,  # pyright: ignore
+        "withdrawal_reason": "surrendered",
+    }
+
+    participant.save(
+        update_fields=[
+            "withdrawn",
+            "defending",
+            "state",
+        ]
+    )
+
+    return {
+        "type": "npc_surrender",
+        "round": encounter.round_number,
+        "actor": participant,
+        "actor_name": participant.npc.npc.name,  # pyright: ignore
+        "success": True,
+    }
+
+
+def get_npc_retreat_destination(
+    encounter: CombatEncounter,
+) -> Location | None:
+    connections = encounter.location.data.get("connections", [])  # pyright: ignore
+
+    return (
+        Location.objects.filter(
+            campaign=encounter.session.campaign,  # pyright: ignore
+            slug__in=connections,
+        )
+        .order_by("slug")
+        .first()
+    )
+
+
+def resolve_npc_flee(
+    *, encounter: CombatEncounter, participant: CombatParticipant
+) -> dict:
+    if participant.npc is None:
+        raise ValidationError("Combat participant is not an NPC.")
+
+    npc = participant.npc
+
+    destination = get_npc_retreat_destination(encounter)
+
+    if destination is None:
+        return {
+            "type": "npc_flee",
+            "round": encounter.round_number,
+            "actor": npc.npc.slug,  # pyright: ignore
+            "actor_name": npc.npc.name,  # pyright: ignore
+            "success": False,
+            "reason": "no_escape_route",
+            "destination": None,
+        }
+
+    modifier = npc.npc.data.get("combat", {}).get("initiative_modifier", 0)  # pyright: ignore
+
+    roll, rolls = roll_d20()
+    total = roll + modifier
+
+    success = total >= NPC_FLEE_DIFFICULTY
+
+    if success:
+        npc.current_location = destination  # pyright: ignore
+
+        npc.save(update_fields=["current_location"])  # pyright: ignore
+
+        participant.withdrawn = True  # pyright: ignore
+        participant.defending = False  # pyright: ignore
+
+        participant.state = {  # pyright: ignore
+            **participant.state,  # pyright: ignore
+            "withdrawal_reason": "fled",
+        }
+
+        participant.save(
+            update_fields=[
+                "withdrawn",
+                "defending",
+                "state",
+            ]
+        )
+
+    return {
+        "type": "npc_flee",
+        "round": encounter.round_number,
+        "actor": npc.npc.slug,  # pyright: ignore
+        "actor_name": npc.npc.name,  # pyright: ignore
+        "success": success,
+        "destination": (destination.slug if success else None),
+        "check": {
+            "roll": roll,
+            "rolls": rolls,
+            "modifier": modifier,
+            "total": total,
+            "difficulty": NPC_FLEE_DIFFICULTY,
+            "success": success,
+        },
+    }
+
+
+def resolve_npc_turn(
+    *,
+    encounter: CombatEncounter,
+    participant: CombatParticipant,
+) -> dict:
+    decision = choose_npc_action(
+        encounter=encounter,
+        participant=participant,
+    )
+
+    match decision.action:
+        case "attack":
+            result = resolve_npc_attack(
+                encounter=encounter,
+                participant=participant,
+            )
+
+        case "defend":
+            result = resolve_npc_defend(
+                encounter=encounter,
+                participant=participant,
+            )
+
+        case "flee":
+            result = resolve_npc_flee(
+                encounter=encounter,
+                participant=participant,
+            )
+
+        case "surrender":
+            result = resolve_npc_surrender(
+                encounter=encounter,
+                participant=participant,
+            )
+
+    return {
+        **result,  # pyright: ignore
+        "decision_reason": decision.reason,
+    }
+
+
 def process_npc_turns(*, encounter: CombatEncounter) -> list[dict]:
     actions: list[dict] = []
 
@@ -350,7 +540,7 @@ def process_npc_turns(*, encounter: CombatEncounter) -> list[dict]:
             break
 
         if participant.team == CombatTeam.ENEMY:
-            result = resolve_npc_attack(
+            result = resolve_npc_turn(
                 encounter=encounter,
                 participant=participant,
             )
@@ -368,6 +558,42 @@ def process_npc_turns(*, encounter: CombatEncounter) -> list[dict]:
         advance_combat_turn(encounter)
 
     return actions
+
+
+def get_npc_combat_events(
+    *,
+    encounter: CombatEncounter,
+    actions: list[dict],
+) -> list[GameEvent]:
+    events: list[GameEvent] = []
+
+    for action in actions:
+        action_type = action["type"]
+
+        if action_type == "npc_surrender":
+            events.append(
+                GameEvent(
+                    type="npc_surrendered",
+                    encounter=encounter.pk,  # pyright: ignore
+                    target=action["actor"].npc.npc.slug,
+                    npc=action["actor"].npc.npc.slug,
+                    location=encounter.location.slug,  # pyright: ignore
+                )
+            )
+
+        elif action_type == "npc_flee" and action["success"]:
+            events.append(
+                GameEvent(
+                    type="npc_fled",
+                    encounter=encounter.pk,  # pyright: ignore
+                    target=action["actor"],
+                    npc=action["actor"],
+                    location=encounter.location.slug,  # pyright: ignore
+                    value=action["destination"],
+                )
+            )
+
+    return events
 
 
 def resolve_player_attack(
@@ -482,6 +708,22 @@ def build_combat_narration(
     lines: list[str] = []
 
     for action in actions:
+        if action["type"] == "npc_defend":
+            lines.append(f"{action['actor_name']} takes a defensive stance.")
+            continue
+
+        if action["type"] == "npc_surrender":
+            lines.append(f"{action['actor_name']} surrenders.")
+            continue
+
+        if action["type"] == "npc_flee":
+            if action["success"]:
+                lines.append(f"{action['actor_name']} escapes the encounter.")
+            else:
+                lines.append(f"{action['actor_name']} attempts to flee but fails.")
+
+            continue
+
         if action["type"] == "player_defend":
             lines.append("You brace yourself against incoming attacks.")
             continue

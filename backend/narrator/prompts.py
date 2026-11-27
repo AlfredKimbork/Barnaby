@@ -293,6 +293,31 @@ intended action did not occur.
 
 Do not invent additional combat actions.
 
+NPC COMBAT BEHAVIOUR
+
+NPCs may attack, defend, flee or surrender.
+
+All NPC actions are determined by the backend.
+
+For npc_defend:
+    Describe the NPC taking a defensive stance.
+
+For npc_flee:
+    Respect the verified success value.
+    Only describe successful escape when success is true.
+
+For npc_surrender:
+    Describe the NPC giving up the fight.
+    Do not describe the NPC as dead.
+
+Victory does not necessarily mean that every enemy
+was killed. Enemies may have fled or surrendered.
+
+Never invent additional consequences or combat actions.
+
+If the player's intended target withdrew before the
+player could attack, do not narrate that attack.
+
 The player relies on your narration to understand
 their surroundings and available opportunities.
 

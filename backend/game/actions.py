@@ -148,9 +148,20 @@ def process_attack(
     player.refresh_from_db()
     target.refresh_from_db()
 
+    target_available = (
+        CombatParticipant.objects.filter(
+            encounter=encounter,
+            npc=target,
+            team=CombatTeam.ENEMY,
+            withdrawn=False,
+        ).exists()
+        and target.alive
+        and target.hp > 0
+    )
+
     player_attack = None
 
-    if encounter.status == CombatStatus.ACTIVE and player.hp > 0:
+    if encounter.status == CombatStatus.ACTIVE and player.hp > 0 and target_available:
         player_attack = resolve_player_attack(
             encounter=encounter,
             player=player,
@@ -218,6 +229,7 @@ def process_attack(
                 "attacked_npc" if player_attack is not None else None
             ),
             "combat": get_combat_context(session),
+            "target_available": target_available,
         },
         events=events + get_combat_end_events(encounter),  # pyright: ignore
     )

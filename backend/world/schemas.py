@@ -157,11 +157,51 @@ class NPCAttackSchema(Schema):
         return self
 
 
+class NPCCombatBehaviorSchema(Schema):
+    style: Literal[
+        "aggressive",
+        "balanced",
+        "cautious",
+        "cowardly",
+        "protective",
+    ] = "aggressive"
+
+    defend_threshold: float | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+    )
+
+    flee_threshold: float | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+    )
+
+    surrender_threshold: float | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+    )
+
+    defend_cooldown: int = Field(
+        default=2,
+        ge=1,
+    )
+
+    can_flee: bool = True
+    can_surrender: bool = True
+
+
 class NPCCombatSchema(Schema):
-    initiative: int = 0
+    initiative_modifier: int = 0
 
     attacks: list[NPCAttackSchema] = Field(
         default_factory=list,
+    )
+
+    behavior: NPCCombatBehaviorSchema = Field(
+        default_factory=NPCCombatBehaviorSchema,
     )
 
 

@@ -374,6 +374,7 @@ class CombatStatus(models.TextChoices):
 
 class CombatTeam(models.TextChoices):
     PLAYER = "player", "Player"  # pyright: ignore
+    ALLY = "ally", "Ally"  # pyright: ignore
     ENEMY = "enemy", "Enemy"  # pyright: ignore
     NEUTRAL = "neutral", "Neutral"  # pyright: ignore
 
@@ -452,6 +453,8 @@ class CombatParticipant(models.Model):
 
     defending = models.BooleanField(default=False)  # pyright: ignore
     withdrawn = models.BooleanField(default=False)  # pyright: ignore
+
+    state = models.JSONField(default=dict, blank=True)
 
     class Meta:
         ordering = ("position",)

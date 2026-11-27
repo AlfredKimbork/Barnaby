@@ -14,12 +14,18 @@ from game.actions import process_attack
 from game.checks import resolve_roll_mode, resolve_skill_check, roll_d20
 from game.combat import (
     advance_combat_turn,
+    evaluate_combat_status,
     get_active_combat,
     get_combat_defense,
     get_current_participant,
+    get_npc_combat_events,
+    resolve_npc_defend,
+    resolve_npc_flee,
+    resolve_npc_surrender,
     start_combat,
 )
 from game.combat_actions import process_combat_action
+from game.combat_ai import choose_npc_action
 from game.events import EventCondition, GameEvent
 from game.general_actions import process_skill_check
 from game.interactions import calculate_interaction_dc
@@ -1247,6 +1253,224 @@ class GameSessionTests(TestCase):
                 action_id=uuid4(),  # pyright: ignore
                 action="defend",  # pyright: ignore
             )
+
+    def configure_npc_behaviour(
+        self,
+        *,
+        style: str,
+        hp: int,
+        **overrides,
+    ):
+        self.npc.data = {
+            **self.npc.data,
+            "combat": {
+                **self.npc.data.get("combat", {}),
+                "behaviour": {
+                    "style": style,
+                    **overrides,
+                },
+            },
+        }
+
+        self.npc.save(update_fields=["data"])
+
+        self.npc_state.max_hp = 20
+        self.npc_state.hp = hp
+
+        self.npc_state.save(update_fields=["hp", "max_hp"])
+
+        encounter = start_combat(
+            session=self.session,  # pyright: ignore
+            enemies=[self.npc_state],  # pyright: ignore
+        )
+
+        participant = CombatParticipant.objects.select_related("npc", "npc__npc").get(
+            encounter=encounter,
+            npc=self.npc_state,
+        )
+
+        return encounter, participant
+
+    def test_healthy_npc_attacks(self):
+        encounter, participant = self.configure_npc_behaviour(
+            style="balanced",
+            hp=20,
+        )
+
+        decision = choose_npc_action(
+            encounter=encounter,  # pyright: ignore
+            participant=participant,
+        )
+
+        self.assertEqual(  # pyright: ignore
+            decision.action,
+            "attack",
+        )
+
+    def test_injured_npc_defends(self):
+        encounter, participant = self.configure_npc_behaviour(
+            style="balanced",
+            hp=6,
+        )
+
+        decision = choose_npc_action(
+            encounter=encounter,  # pyright: ignore
+            participant=participant,
+        )
+
+        self.assertEqual(  # pyright: ignore
+            decision.action,
+            "defend",
+        )
+
+    def test_npc_defensive_cooldown(self):
+        encounter, participant = self.configure_npc_behaviour(
+            style="balanced",
+            hp=6,
+        )
+
+        resolve_npc_defend(
+            encounter=encounter,  # pyright: ignore
+            participant=participant,
+        )
+
+        decision = choose_npc_action(
+            encounter=encounter,  # pyright: ignore
+            participant=participant,
+        )
+
+        self.assertEqual(  # pyright: ignore
+            decision.action,
+            "attack",
+        )
+
+    def test_cautious_npc_flees(self):
+        encounter, participant = self.configure_npc_behaviour(
+            style="cautious",
+            hp=4,
+        )
+
+        decision = choose_npc_action(
+            encounter=encounter,  # pyright: ignore
+            participant=participant,
+        )
+
+        self.assertEqual(  # pyright: ignore
+            decision.action,
+            "flee",
+        )
+
+    def test_npc_surrender_decision(self):
+        encounter, participant = self.configure_npc_behaviour(
+            style="balanced",
+            hp=2,
+        )
+
+        decision = choose_npc_action(
+            encounter=encounter,  # pyright: ignore
+            participant=participant,
+        )
+
+        self.assertEqual(  # pyright: ignore
+            decision.action,
+            "surrender",
+        )
+
+    def test_aggressive_npc_continues_fighting(self):
+        encounter, participant = self.configure_npc_behaviour(
+            style="aggressive",
+            hp=1,
+        )
+
+        decision = choose_npc_action(
+            encounter=encounter,  # pyright: ignore
+            participant=participant,
+        )
+
+        self.assertEqual(  # pyright: ignore
+            decision.action,
+            "attack",
+        )
+
+    def test_npc_surrender_preserves_life(self):
+        encounter, participant = self.configure_npc_behaviour(
+            style="balanced",
+            hp=2,
+        )
+
+        resolve_npc_surrender(
+            encounter=encounter,  # pyright: ignore
+            participant=participant,
+        )
+
+        self.npc_state.refresh_from_db()
+        participant.refresh_from_db()
+
+        self.assertTrue(self.npc_state.alive)
+        self.assertEqual(self.npc_state.hp, 2)  # pyright: ignore
+        self.assertTrue(participant.withdrawn)
+
+        self.assertEqual(  # pyright: ignore
+            evaluate_combat_status(encounter),  # pyright: ignore
+            CombatStatus.VICTORY,
+        )
+
+    def test_npc_surrender_event(self):
+        encounter, participant = self.configure_npc_behaviour(
+            style="balanced",
+            hp=2,
+        )
+
+        result = resolve_npc_surrender(
+            encounter=encounter,  # pyright: ignore
+            participant=participant,
+        )
+
+        events = get_npc_combat_events(
+            encounter=encounter,  # pyright: ignore
+            actions=[result],
+        )
+
+        self.assertEqual(len(events), 1)  # pyright: ignore
+
+        self.assertEqual(  # pyright: ignore
+            events[0].type,
+            "npc_surrendered",
+        )
+
+        self.assertEqual(  # pyright: ignore
+            events[0].npc,
+            self.npc.slug,
+        )
+
+    def test_npc_successful_escape(self):
+        encounter, participant = self.configure_npc_behaviour(
+            style="cautious",
+            hp=2,
+        )
+
+        original_location = self.npc_state.current_location
+
+        with patch(
+            "game.checks.randint",
+            return_value=20,
+        ):
+            result = resolve_npc_flee(
+                encounter=encounter,  # pyright: ignore
+                participant=participant,
+            )
+
+        self.npc_state.refresh_from_db()
+        participant.refresh_from_db()
+
+        self.assertTrue(result["success"])
+        self.assertTrue(participant.withdrawn)
+        self.assertTrue(self.npc_state.alive)
+
+        self.assertNotEqual(
+            self.npc_state.current_location,
+            original_location,
+        )
 
 
 class AttackMechanicsTest(TestCase):
