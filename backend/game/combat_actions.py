@@ -19,6 +19,7 @@ from game.combat import (
     process_npc_turns,
     retreat_companions,
 )
+from game.combat_consequence import resolve_player_surrender
 from game.events import GameEvent
 from game.models import (
     CombatEncounter,
@@ -254,10 +255,14 @@ def process_combat_action(
 
                 events.extend(flee_events)
             case "surrender":
-                player_result = resolve_surrender(
+                player_result, surrender_events = resolve_player_surrender(
+                    session=session,
                     encounter=encounter,
                     participant=participant,
+                    player=player,
                 )
+
+                events.extend(surrender_events)
 
         combat_actions.append(player_result)
 

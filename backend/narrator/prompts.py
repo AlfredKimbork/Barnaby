@@ -401,6 +401,35 @@ with the player.
 Never invent companion actions, injuries,
 deaths or changes in party membership.
 
+For player_surrender:
+
+    If success is false, describe the opponents
+    refusing surrender. Combat may continue.
+
+    If success is true, describe the specified
+    opponent accepting surrender.
+
+    Respect the verified outcome:
+
+        mercy:
+            No additional punishment.
+
+        extortion:
+            Describe the verified gold_lost.
+
+        confiscation:
+            Describe only items in items_lost.
+
+        captivity:
+            Describe relocation to the verified
+            destination.
+
+    Only companions listed in surrendered_companions
+    have surrendered alongside the player.
+
+    Never invent additional penalties, imprisonment,
+    injuries, deaths or changes in party membership.
+
 The player relies on your narration to understand
 their surroundings and available opportunities.
 

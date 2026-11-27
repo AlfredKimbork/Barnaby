@@ -950,7 +950,7 @@ def build_combat_narration(
     lines: list[str] = []
 
     for action in actions:
-        if action["type"] == "reinforcemt_joined":
+        if action["type"] == "reinforcement_joined":
             lines.append(f"{action['actor_name']} joins the combat as a reinforcement.")
             continue
 
@@ -987,7 +987,26 @@ def build_combat_narration(
             continue
 
         if action["type"] == "player_surrender":
-            lines.append("You surrender to your enemies.")
+            if not action["success"]:
+                lines.append("Your opponents refuse your surrender.")
+                continue
+
+            opponent = action["opponent_name"]
+
+            lines.append(f"{opponent} accepts your surrender.")
+
+            if action["gold_lost"]:
+                lines.append(f"You lose {action['gold_lost']} gold.")
+
+            for item in action["items_lost"]:
+                lines.append(f"Your {item.replace('_', ' ')} is confiscated.")
+
+            if action["destination"]:
+                lines.append("You are captured and taken away.")
+
+            if action["surrendered_companions"]:
+                lines.append("Your active companions cease fighting.")
+
             continue
 
         if action["type"] == "player_attack":

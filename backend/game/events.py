@@ -32,6 +32,9 @@ EventType = Literal[
     "companion_surrendered",
     "combat_reinforcement_joined",
     "companion_betrayed",
+    "surrender_accepted",
+    "surrender_refused",
+    "player_captured",
 ]
 
 

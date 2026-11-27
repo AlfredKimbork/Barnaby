@@ -96,6 +96,11 @@ npcs:
         surrender_threshold: 0.2
         can_flee: false
         defend_cooldown: 2
+
+        surrender:
+          outcome: confiscation
+          priority: 10
+
     recruitment:
       enabled: true
       minimum_trust: 25
@@ -190,10 +195,16 @@ npcs:
           damage_modifier: 0
           damage_dice: "1d2"
           damage_type: bludgeoning
+
       behaviour:
         style: cowardly
         surrender_threshold: 0.7
         can_flee: false
+
+      surrender:
+        outcome: extortion
+        gold_amount: 25
+        priority: 10
 
     recruitment:
       enabled: true
@@ -284,11 +295,16 @@ npcs:
         flee_threshold: 0.25
         defend_cooldown: 2
 
+      surrender:
+        outcome: mercy
+        maximum_hostility: 60
+
     recruitment:
       enabled: true
       minimum_trust: 10
       maximum_hostility: 10
       difficulty: 12
+
     dialogue_examples:
       greeting: "If you're heading into the forest, turn around."
       lyra: "My sister is still out there. I know she is."
@@ -368,10 +384,14 @@ npcs:
           damage_modifier: 0
           damage_dice: "1d2"
           damage_type: bludgeoning
+
       behaviour:
         style: protective
         surrender_threshold: 0.25
         defend_threshold: 0.6
+
+      surrender:
+        outcome: mercy
 
     recruitment:
       enabled: true
@@ -454,10 +474,15 @@ npcs:
           damage_modifier: 2
           damage_dice: "2d6"
           damage_type: psychic
+
       behaviour:
         style: aggressive
         can_flee: false
         can_surrender: false
+
+      surrender:
+        outcome: refusal
+        priority: 100
 
     recruitment:
       enabled: false

@@ -204,6 +204,50 @@ class NPCReinforcementSchema(Schema):
     )
 
 
+class NPCSurrenderSchema(Schema):
+    outcome: Literal[
+        "mercy",
+        "extortion",
+        "confiscation",
+        "captivity",
+        "refusal",
+    ] = "mercy"
+
+    gold_amount: int = Field(
+        default=0,
+        ge=0,
+    )
+
+    destination: str | None = None
+
+    priority: int = Field(
+        default=0,
+        ge=0,
+    )
+
+    minimum_trust: int | None = Field(
+        default=None,
+        ge=-100,
+        le=100,
+    )
+
+    maximum_hostility: int | None = Field(
+        default=None,
+        ge=0,
+        le=100,
+    )
+
+    @model_validator(mode="after")
+    def validate_surrender(self):
+        if self.outcome == "captivity" and not self.destination:
+            raise ValueError("Captivity outcome requires a destination.")
+
+        if self.outcome == "extortion" and self.gold_amount <= 0:
+            raise ValueError("Extortion outcome requires a positive gold amount.")
+
+        return self
+
+
 class NPCCombatSchema(Schema):
     initiative_modifier: int = 0
 
@@ -216,7 +260,11 @@ class NPCCombatSchema(Schema):
     )
 
     reinforcement: NPCReinforcementSchema = Field(
-        default_factory=NPCReinforcementSchema
+        default_factory=NPCReinforcementSchema,
+    )
+
+    surrender: NPCSurrenderSchema = Field(
+        default_factory=NPCSurrenderSchema,
     )
 
 

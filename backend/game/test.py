@@ -2105,6 +2105,173 @@ class GameSessionTests(TestCase):
         with self.assertRaises(ValidationError):
             join_combat(**kwargs)
 
+    def configure_surrender(self, **config):
+        self.npc.data = {
+            **self.npc.data,
+            "combat": {
+                **self.npc.data.get("combat", {}),
+                "surrender": config,
+            },
+        }
+
+        self.npc.save(update_fields=["data"])
+
+    @patch(
+        "game.checks.randint",
+        side_effect=[20, 1, 1],
+    )
+    def test_surrender_refused(self, mock_roll):
+        self.configure_surrender(
+            outcome="refusal",
+        )
+
+        encounter = start_combat(
+            session=self.session,  # pyright: ignore
+            enemies=[self.npc_state],  # pyright: ignore
+        )
+
+        turn = process_combat_action(
+            session=self.session,  # pyright: ignore
+            action_id=uuid4(),  # pyright: ignore
+            action="surrender",  # pyright: ignore
+        )
+
+        encounter.refresh_from_db()  # pyright: ignore
+
+        result = turn.mechanical_result  # pyright: ignore
+
+        self.assertFalse(result["player_result"]["success"])
+        self.assertEqual(  # pyright: ignore
+            result["player_result"]["refusing_opponents"],
+            [self.npc.slug],
+        )
+
+        self.assertEqual(  # pyright: ignore
+            encounter.status,  # pyright: ignore
+            CombatStatus.ACTIVE,
+        )
+
+        self.assertEqual(  # pyright: ignore
+            result["combat_actions"][1]["type"],
+            "npc_attack",
+        )
+
+    @patch(
+        "game.checks.randint",
+        side_effect=[20, 1],
+    )
+    def test_surrender_extortion(self, mock_roll):
+        self.configure_surrender(
+            outcome="extortion",
+            gold_amount=25,
+        )
+
+        player = self.session.player_state  # pyright: ignore
+
+        player.gold = 40
+        player.save(update_fields=["gold"])
+
+        encounter = start_combat(
+            session=self.session,  # pyright: ignore
+            enemies=[self.npc_state],  # pyright: ignore
+        )
+
+        turn = process_combat_action(
+            session=self.session,  # pyright: ignore
+            action_id=uuid4(),  # pyright: ignore
+            action="surrender",  # pyright: ignore
+        )
+
+        player.refresh_from_db()
+        encounter.refresh_from_db()  # pyright: ignore
+
+        self.assertEqual(player.gold, 15)  # pyright: ignore
+
+        self.assertEqual(  # pyright: ignore
+            encounter.status,  # pyright: ignore
+            CombatStatus.SURRENDERED,
+        )
+
+        self.assertEqual(  # pyright: ignore
+            turn.mechanical_result["player_result"]["gold_lost"],  # pyright: ignore
+            25,
+        )
+
+    @patch(
+        "game.checks.randint",
+        side_effect=[20, 1],
+    )
+    def test_surrender_cannot_create_negative_gold(
+        self,
+        mock_roll,
+    ):
+        self.configure_surrender(
+            outcome="extortion",
+            gold_amount=25,
+        )
+
+        player = self.session.player_state  # pyright: ignore
+
+        player.gold = 8
+        player.save(update_fields=["gold"])
+
+        start_combat(
+            session=self.session,  # pyright: ignore
+            enemies=[self.npc_state],  # pyright: ignore
+        )
+
+        turn = process_combat_action(
+            session=self.session,  # pyright: ignore
+            action_id=uuid4(),  # pyright: ignore
+            action="surrender",  # pyright: ignore
+        )
+
+        player.refresh_from_db()
+
+        self.assertEqual(player.gold, 0)  # pyright: ignore
+
+        self.assertEqual(  # pyright: ignore
+            turn.mechanical_result["player_result"]["gold_lost"],  # pyright: ignore
+            8,
+        )
+
+    @patch(
+        "game.checks.randint",
+        side_effect=[20, 1],
+    )
+    def test_duplicate_surrender_penalty(
+        self,
+        mock_roll,
+    ):
+        self.configure_surrender(
+            outcome="extortion",
+            gold_amount=25,
+        )
+
+        player = self.session.player_state  # pyright: ignore
+
+        player.gold = 100
+        player.save(update_fields=["gold"])
+
+        start_combat(
+            session=self.session,  # pyright: ignore
+            enemies=[self.npc_state],  # pyright: ignore
+        )
+
+        kwargs = {
+            "session": self.session,
+            "action_id": uuid4(),
+            "action": "surrender",
+        }
+
+        first = process_combat_action(**kwargs)
+        second = process_combat_action(**kwargs)
+
+        player.refresh_from_db()
+
+        self.assertEqual(first.pk, second.pk)  # pyright: ignore
+        self.assertEqual(player.gold, 75)  # pyright: ignore
+
 
 class AttackMechanicsTest(TestCase):
     @patch("game.mechanics.roll_d20", return_value=(15, (15,)))
