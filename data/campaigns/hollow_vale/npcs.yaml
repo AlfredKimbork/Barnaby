@@ -80,22 +80,28 @@ npcs:
       alive: true
       recruited: false
 
-      combat:
-        initiative_modifier: 1
-        attacks:
-          - id: improvised_club
-            name: Improvised Club
-            attack_bonus: 3
-            damage_modifier: 2
-            damage_dice: "1d4"
-            damage_type: bludgeoning
+    combat:
+      initiative_modifier: 1
+      attacks:
+        - id: improvised_club
+          name: Improvised Club
+          attack_bonus: 3
+          damage_modifier: 2
+          damage_dice: "1d4"
+          damage_type: bludgeoning
 
-        behaviour:
-          style: balanced
-          defend_threshold: 0.4
-          surrender_threshold: 0.2
-          can_flee: false
-          defend_cooldown: 2
+      behaviour:
+        style: balanced
+        defend_threshold: 0.4
+        surrender_threshold: 0.2
+        can_flee: false
+        defend_cooldown: 2
+    recruitment:
+      enabled: true
+      minimum_trust: 25
+      maximum_hostility: 5
+      difficulty: 16
+      retry_cooldown: 5
 
     dialogue_examples:
       greeting: "You look soaked. Sit down before you freeze."
@@ -175,19 +181,25 @@ npcs:
       alive: true
       recruited: false
 
-      combat:
-        initiative_modifier: 0
-        attacks:
-          - id: unarmed
-            name: Unarmed Strike
-            attack_bonus: 0
-            damage_modifier: 0
-            damage_dice: "1d2"
-            damage_type: bludgeoning
-        behaviour:
-          style: cowardly
-          surrender_threshold: 0.7
-          can_flee: false
+    combat:
+      initiative_modifier: 0
+      attacks:
+        - id: unarmed
+          name: Unarmed Strike
+          attack_bonus: 0
+          damage_modifier: 0
+          damage_dice: "1d2"
+          damage_type: bludgeoning
+      behaviour:
+        style: cowardly
+        surrender_threshold: 0.7
+        can_flee: false
+
+    recruitment:
+      enabled: true
+      minimum_trust: 40
+      maximum_hostility: 0
+      difficulty: 18
 
     dialogue_examples:
       greeting: "Welcome to Hollowmere. I hope your stay is brief."
@@ -256,22 +268,27 @@ npcs:
       alive: true
       recruited: false
 
-      combat:
-        initiative_modifier: 3
-        attacks:
-          - id: hunting_bow
-            name: Hunting Bow
-            attack_bonus: 5
-            damage_modifier: 3
-            damage_dice: "1d6"
-            damage_type: piercing
+    combat:
+      initiative_modifier: 3
+      attacks:
+        - id: hunting_bow
+          name: Hunting Bow
+          attack_bonus: 5
+          damage_modifier: 3
+          damage_dice: "1d6"
+          damage_type: piercing
 
-        behaviour:
-          style: cautious
-          defend_threshold: 0.5
-          flee_threshold: 0.25
-          defend_cooldown: 2
+      behaviour:
+        style: cautious
+        defend_threshold: 0.5
+        flee_threshold: 0.25
+        defend_cooldown: 2
 
+    recruitment:
+      enabled: true
+      minimum_trust: 10
+      maximum_hostility: 10
+      difficulty: 12
     dialogue_examples:
       greeting: "If you're heading into the forest, turn around."
       lyra: "My sister is still out there. I know she is."
@@ -342,19 +359,25 @@ npcs:
       alive: true
       recruited: false
 
-      combat:
-        initiative_modifier: 0
-        attacks:
-          - id: unarmed
-            name: Unarmed Strike
-            attack_bonus: 0
-            damage_modifier: 0
-            damage_dice: "1d2"
-            damage_type: bludgeoning
-        behaviour:
-          style: protective
-          surrender_threshold: 0.25
-          defend_threshold: 0.6
+    combat:
+      initiative_modifier: 0
+      attacks:
+        - id: unarmed
+          name: Unarmed Strike
+          attack_bonus: 0
+          damage_modifier: 0
+          damage_dice: "1d2"
+          damage_type: bludgeoning
+      behaviour:
+        style: protective
+        surrender_threshold: 0.25
+        defend_threshold: 0.6
+
+    recruitment:
+      enabled: true
+      minimum_trust: 20
+      maximum_hostility: 5
+      difficulty: 14
 
     dialogue_examples:
       greeting: "May the light guide you, traveler."
@@ -422,19 +445,24 @@ npcs:
       alive: true
       recruited: false
 
-      combat:
-        initiative_modifier: 2
-        attacks:
-          - id: psychic_touch
-            name: Psychic Touch
-            attack_bonus: 5
-            damage_modifier: 2
-            damage_dice: "2d6"
-            damage_type: psychic
-        behaviour:
-          style: aggressive
-          can_flee: false
-          can_surrender: false
+    combat:
+      initiative_modifier: 2
+      attacks:
+        - id: psychic_touch
+          name: Psychic Touch
+          attack_bonus: 5
+          damage_modifier: 2
+          damage_dice: "2d6"
+          damage_type: psychic
+      behaviour:
+        style: aggressive
+        can_flee: false
+        can_surrender: false
+
+    recruitment:
+      enabled: false
+      refusal_reason: >
+        The Listener refuses to abandon the sanctuary.
 
     dialogue_examples:
       greeting: "You carry so many moments within you."

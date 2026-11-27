@@ -170,6 +170,12 @@ class NPCState(models.Model):
             ),
         )
 
+    @property
+    def is_recruited(self) -> bool:
+        return bool(
+            self.state.get("recruited", False)  # pyright: ignore
+        )
+
 
 class NPCMemory(models.Model):
     objects = models.Manager()

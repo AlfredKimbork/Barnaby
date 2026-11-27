@@ -86,6 +86,16 @@ class SurrenderAction(BaseModel):
     type: Literal["surrender"]
 
 
+class RecruitAction(BaseModel):
+    type: Literal["recruit"]
+    target_slug: str
+
+
+class DismissAction(BaseModel):
+    type: Literal["dismiss"]
+    target_slug: str
+
+
 GameAction = Annotated[
     AttackAction
     | MoveAction
@@ -96,7 +106,9 @@ GameAction = Annotated[
     | RoleplayAction
     | DefendAction
     | FleeAction
-    | SurrenderAction,
+    | SurrenderAction
+    | RecruitAction
+    | DismissAction,
     Field(discriminator="type"),
 ]
 
@@ -113,6 +125,8 @@ class AIActionResponse(BaseModel):
         "defend",
         "flee",
         "surrender",
+        "recruit",
+        "dismiss",
     ]
     target_slug: str | None = None
     weapon_slug: str | None = None
@@ -155,12 +169,21 @@ class AIActionResponse(BaseModel):
                 "intent",
                 "message",
             ],
-            "roleplay": ["description", "message"],
+            "roleplay": [
+                "description",
+                "message",
+            ],
             "defend": [],
             "flee": [
                 "destination_slug",
             ],
             "surrender": [],
+            "recruit": [
+                "target_slug",
+            ],
+            "dismiss": [
+                "target_slug",
+            ],
         }
 
         for field in required[self.type]:

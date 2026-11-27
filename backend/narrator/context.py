@@ -1,4 +1,5 @@
 from game.combat import get_combat_context
+from game.companions import get_party_context
 from game.general_actions import get_visible_challenges
 from game.interactables import get_visible_interactables
 from game.knowledge import (
@@ -39,6 +40,7 @@ def build_interpreter_context(session: GameSession):
         "inventory": session.player_state.inventory,  # pyright: ignore
         "available_challenges": get_visible_challenges(session),
         "combat": get_combat_context(session),
+        "party": get_party_context(session),
     }
 
 
@@ -47,7 +49,7 @@ def build_dialogue_context(
 ):
     target_slug = action.target_slug
 
-    npc_state = (
+    npc = (
         NPCState.objects.filter(
             session=session,
             npc__slug=target_slug,
@@ -56,22 +58,23 @@ def build_dialogue_context(
         .first()
     )
 
-    memories = get_npc_memories(npc_state)
+    memories = get_npc_memories(npc)
 
-    npc_data = npc_state.npc.data
+    npc_data = npc.npc.data
 
     return {
         "npc": {
-            "name": npc_state.npc.name,
+            "name": npc.npc.name,
             "personality": npc_data.get("personality", ""),
             "role": npc_data.get("role", ""),
-            "hostility": npc_state.hostility,
-            "trust": npc_state.trust,
+            "hostility": npc.hostility,
+            "trust": npc.trust,
+            "recruited": npc.is_recruited,
         },
         "memories": memories,
         "permitted_knowledge": get_permitted_knowledge(
             session,
-            npc_state,
+            npc,
         ),
         "known_knowledge_ids": sorted(
             get_discovered_knowledge_ids(session),
@@ -110,6 +113,7 @@ def build_narrator_context(session: GameSession, turn: GameTurn):
                 "hostility": state.hostility,
                 "trust": state.trust,
                 "public_knowledge": npc_data.get("public_knowledge", []),
+                "recruited": state.is_recruited,
             }
         )
 
@@ -152,4 +156,5 @@ def build_narrator_context(session: GameSession, turn: GameTurn):
         "quests": get_visible_quests(session),
         "discovered_knowledge": get_discovered_knowledge(session),
         "combat": get_combat_context(session),
+        "party": get_party_context(session),
     }

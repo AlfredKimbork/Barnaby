@@ -24,6 +24,9 @@ EventType = Literal[
     "npc_surrendered",
     "npc_fled",
     "player_surrendered",
+    "npc_recruited",
+    "npc_dismissed",
+    "recruitment_failed",
 ]
 
 

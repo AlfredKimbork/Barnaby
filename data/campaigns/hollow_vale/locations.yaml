@@ -70,34 +70,35 @@ locations:
             failure:
               description: You cannot determine how many people passed.
 
-          - id: tavern_roof
-            description: The sloping roof of the tavern.
+      - id: tavern_roof
+        description: The sloping roof of the tavern.
 
-            approaches:
-              - id: climb
-                description: Climb onto the roof.
-                skill: athletics
-                difficulty: 14
-                repeatable: true
+        approaches:
+          - id: climb
+            description: Climb onto the roof.
+            skill: athletics
+            difficulty: 14
+            repeatable: true
 
-                success:
-                  description: You successfully climb onto the roof.
-                  flags:
-                    on_tavern_roof: true
+            success:
+              description: You successfully climb onto the roof.
+              flags:
+                on_tavern_roof: true
 
-                failure:
-                  description: You lose your grip and slide back down.
-                  damage: 2
-          - id: wooden_bench
-            description: A wooden bench outside the tavern.
+            failure:
+              description: You lose your grip and slide back down.
+              damage: 2
 
-            approaches:
-              - id: sit
-                description: Sit down on the bench.
-                repeatable: true
+      - id: wooden_bench
+        description: A wooden bench outside the tavern.
 
-                success:
-                  description: You sit down on the wooden bench.
+        approaches:
+          - id: sit
+            description: Sit down on the bench.
+            repeatable: true
+
+            success:
+              description: You sit down on the wooden bench.
 
   - id: hollowmere_square
     name: "Hollowmere Village Square"

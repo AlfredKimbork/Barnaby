@@ -7,6 +7,7 @@ from rest_framework.exceptions import APIException
 
 from game.actions import process_attack, process_inspect, process_movement, process_talk
 from game.combat_actions import process_combat_action
+from game.companions import process_companion_action
 from game.general_actions import process_roleplay, process_skill_check
 from game.interactables import process_interactable
 from game.knowledge import finalize_dialogue
@@ -129,6 +130,15 @@ def play_turn(
                 action_id=action_id,  # pyright: ignore
                 action=action.type,  # pyright: ignore
                 destination=action.destination_slug,  # pyright: ignore
+                original_message=message,  # pyright: ignore
+            )
+
+        case "recruit" | "dismiss":
+            turn = process_companion_action(
+                session=session,  # pyright: ignore
+                action_id=action_id,  # pyright: ignore
+                action=action.type,  # pyright: ignore
+                target_slug=action.target_slug,  # pyright: ignore
                 original_message=message,  # pyright: ignore
             )
 

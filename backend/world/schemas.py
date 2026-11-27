@@ -56,7 +56,7 @@ class ChallengeApproachSchema(Schema):
     repeatable: bool = False
 
     success: ChallengeOutcomeShema
-    failure: ChallengeOutcomeShema
+    failure: ChallengeOutcomeShema | None = None
 
     @model_validator(mode="after")
     def validate_skill_check(self):
@@ -205,6 +205,39 @@ class NPCCombatSchema(Schema):
     )
 
 
+class NPCRecruitmentSchema(Schema):
+    enabled: bool = True
+
+    minimum_trust: int = Field(
+        default=10,
+        ge=-100,
+        le=100,
+    )
+
+    maximum_hostility: int = Field(
+        default=10,
+        ge=0,
+        le=100,
+    )
+
+    difficulty: int = Field(
+        default=14,
+        ge=1,
+        le=40,
+    )
+
+    retry_cooldown: int = Field(
+        default=5,
+        ge=0,
+    )
+
+    required_flags: dict[str, bool | int | str] = Field(
+        default_factory=dict,
+    )
+
+    refusal_reason: str = ""
+
+
 class NPCSchema(Schema):
     id: str
     name: str
@@ -215,6 +248,10 @@ class NPCSchema(Schema):
 
     combat: NPCCombatSchema = Field(
         default_factory=NPCCombatSchema,
+    )
+
+    recruitment: NPCRecruitmentSchema = Field(
+        default_factory=NPCRecruitmentSchema,
     )
 
     appearance: str
@@ -360,13 +397,13 @@ class ItemSchema(Schema):
 
     @model_validator(mode="after")
     def validate_weapon(self):
-        if self.type == "weapon":
+        if self.type != "weapon":
             return self
 
         damage_dice = self.properties.get("damage_dice")
 
         if not isinstance(damage_dice, str):
-            raise ValidationError(
+            raise TypeError(
                 f"Item '{self.id}' of type '{self.type}' must have a 'damage_dice' property of type str"
             )
 
@@ -376,14 +413,14 @@ class ItemSchema(Schema):
         )
 
         if match is None:
-            raise ValidationError(
+            raise ValueError(
                 f"Item '{self.id}' has invalid damage dice: '{damage_dice}'"
             )
 
         count, sides = map(int, match.groups())
 
         if count > 20 or sides > 100:
-            raise ValidationError(
+            raise ValueError(
                 f"Item '{self.id}' has damage dice out of bounds: '{damage_dice}'"
             )
 
@@ -397,7 +434,7 @@ class ItemSchema(Schema):
             "dexterity",
             "finesse",
         }:
-            raise ValidationError(
+            raise ValueError(
                 f"Item '{self.id}' has invalid damage attribute: '{attribute}'"
             )
 

@@ -10,7 +10,7 @@ from django.urls import reverse
 from rest_framework.test import APIClient
 
 from characters.models import Character
-from game.actions import process_attack
+from game.actions import process_attack, process_movement
 from game.checks import resolve_roll_mode, resolve_skill_check, roll_d20
 from game.combat import (
     advance_combat_turn,
@@ -26,6 +26,7 @@ from game.combat import (
 )
 from game.combat_actions import process_combat_action
 from game.combat_ai import choose_npc_action
+from game.companions import get_companions, process_companion_action
 from game.events import EventCondition, GameEvent
 from game.general_actions import process_skill_check
 from game.interactions import calculate_interaction_dc
@@ -1471,6 +1472,256 @@ class GameSessionTests(TestCase):
             self.npc_state.current_location,
             original_location,
         )
+
+    @patch(
+        "game.checks.randint",
+        return_value=20,
+    )
+    def test_recruit_companion(
+        self,
+        mock_roll,
+    ):
+        self.npc_state.trust = 30
+        self.npc_state.save(update_fields=["trust"])
+
+        turn = process_companion_action(
+            session=self.session,  # pyright: ignore
+            action_id=uuid4(),  # pyright: ignore
+            action="recruit",  # pyright: ignore
+            target_slug=self.npc.slug,  # pyright: ignore
+        )
+
+        self.npc_state.refresh_from_db()
+
+        self.assertTrue(self.npc_state.is_recruited)
+
+        self.assertTrue(
+            turn.mechanical_result["result"]["success"]  # pyright: ignore
+        )
+
+        self.assertEqual(  # pyright: ignore
+            get_companions(self.session).count(),  # pyright: ignore
+            1,
+        )
+
+    @patch("game.checks.randint")
+    def test_recruitment_requires_trust(
+        self,
+        mock_roll,
+    ):
+        self.npc_state.trust = 0
+        self.npc_state.save(update_fields=["trust"])
+
+        turn = process_companion_action(
+            session=self.session,  # pyright: ignore
+            action_id=uuid4(),  # pyright: ignore
+            action="recruit",  # pyright: ignore
+            target_slug=self.npc.slug,  # pyright: ignore
+        )
+
+        self.npc_state.refresh_from_db()
+
+        self.assertFalse(self.npc_state.is_recruited)
+
+        self.assertEqual(  # pyright: ignore
+            turn.mechanical_result["result"]["reason"],  # pyright: ignore
+            "insufficient_trust",
+        )
+
+        mock_roll.assert_not_called()
+
+    @patch(
+        "game.checks.randint",
+        return_value=1,
+    )
+    def test_failed_recruitment(
+        self,
+        mock_roll,
+    ):
+        self.npc_state.trust = 10
+        self.npc_state.save(update_fields=["trust"])
+
+        turn = process_companion_action(
+            session=self.session,  # pyright: ignore
+            action_id=uuid4(),  # pyright: ignore
+            action="recruit",  # pyright: ignore
+            target_slug=self.npc.slug,  # pyright: ignore
+        )
+
+        self.npc_state.refresh_from_db()
+
+        self.assertFalse(self.npc_state.is_recruited)
+
+        self.assertEqual(  # pyright: ignore
+            turn.mechanical_result["result"]["reason"],  # pyright: ignore
+            "persuasion_failed",
+        )
+
+    @patch(
+        "game.checks.randint",
+        return_value=1,
+    )
+    def test_recruitment_cooldown(
+        self,
+        mock_roll,
+    ):
+        self.npc_state.trust = 10
+        self.npc_state.save(update_fields=["trust"])
+
+        kwargs = {
+            "session": self.session,
+            "action": "recruit",
+            "target_slug": self.npc.slug,
+        }
+
+        process_companion_action(
+            action_id=uuid4(),  # pyright: ignore
+            **kwargs,
+        )
+
+        second = process_companion_action(
+            action_id=uuid4(),  # pyright: ignore
+            **kwargs,
+        )
+
+        self.assertEqual(  # pyright: ignore
+            second.mechanical_result["result"]["reason"],  # pyright: ignore
+            "recruitment_cooldown",
+        )
+
+        self.assertEqual(  # pyright: ignore
+            mock_roll.call_count,
+            1,
+        )
+
+    def test_dismiss_companion(self):
+        self.npc_state.state = {
+            **self.npc_state.state,
+            "recruited": True,
+        }
+
+        self.npc_state.save(update_fields=["state"])
+
+        turn = process_companion_action(
+            session=self.session,  # pyright: ignore
+            action_id=uuid4(),  # pyright: ignore
+            action="dismiss",  # pyright: ignore
+            target_slug=self.npc.slug,  # pyright: ignore
+        )
+
+        self.npc_state.refresh_from_db()
+
+        self.assertFalse(self.npc_state.is_recruited)
+
+        self.assertTrue(
+            turn.mechanical_result["result"]["success"]  # pyright: ignore
+        )
+
+        self.assertEqual(  # pyright: ignore
+            get_companions(self.session).count(),  # pyright: ignore
+            0,
+        )
+
+    def test_companion_follows_player(self):
+        self.npc_state.state = {
+            **self.npc_state.state,
+            "recruited": True,
+        }
+
+        self.npc_state.save(update_fields=["state"])
+
+        destination = self.session.current_location.data["connections"][0]  # pyright: ignore
+
+        turn = process_movement(
+            session=self.session,  # pyright: ignore
+            action_id=uuid4(),  # pyright: ignore
+            destination_slug=destination,  # pyright: ignore
+        )
+
+        self.session.refresh_from_db()  # pyright: ignore
+        self.npc_state.refresh_from_db()
+
+        self.assertEqual(  # pyright: ignore
+            self.npc_state.current_location,
+            self.session.current_location,  # pyright: ignore
+        )
+
+        self.assertIn(
+            self.npc.slug,
+            turn.mechanical_result[  # pyright: ignore
+                "following_companions"
+            ],
+        )
+
+    def test_dismissed_npc_does_not_follow(self):
+        original_location = self.npc_state.current_location
+
+        self.npc_state.state = {
+            **self.npc_state.state,
+            "recruited": False,
+        }
+
+        self.npc_state.save(update_fields=["state"])
+
+        destination = self.session.current_location.data["connections"][0]  # pyright: ignore
+
+        process_movement(
+            session=self.session,  # pyright: ignore
+            action_id=uuid4(),  # pyright: ignore
+            destination_slug=destination,  # pyright: ignore
+        )
+
+        self.npc_state.refresh_from_db()
+
+        self.assertEqual(  # pyright: ignore
+            self.npc_state.current_location,
+            original_location,
+        )
+
+    @patch(
+        "game.checks.randint",
+        return_value=20,
+    )
+    def test_duplicate_recruitment(
+        self,
+        mock_roll,
+    ):
+        self.npc_state.trust = 30
+        self.npc_state.save(update_fields=["trust"])
+
+        kwargs = {
+            "session": self.session,
+            "action_id": uuid4(),
+            "action": "recruit",
+            "target_slug": self.npc.slug,
+        }
+
+        first = process_companion_action(**kwargs)
+        second = process_companion_action(**kwargs)
+
+        self.assertEqual(  #  pyright: ignore
+            first.pk,  #  pyright: ignore
+            second.pk,  #  pyright: ignore
+        )
+
+        self.assertEqual(  #  pyright: ignore
+            mock_roll.call_count,
+            1,
+        )
+
+    def test_cannot_recruit_during_combat(self):
+        start_combat(
+            session=self.session,  # pyright: ignore
+            enemies=[self.npc_state],  # pyright: ignore
+        )
+
+        with self.assertRaises(ValidationError):
+            process_companion_action(
+                session=self.session,  # pyright: ignore
+                action_id=uuid4(),  # pyright: ignore
+                action="recruit",  # pyright: ignore
+                target_slug=self.npc.slug,  # pyright: ignore
+            )
 
 
 class AttackMechanicsTest(TestCase):

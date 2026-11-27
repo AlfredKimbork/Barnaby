@@ -93,6 +93,29 @@ class MockAIProvider:
                 }
             )
 
+        if "recruit" in text or "join my party" in text:
+            for npc in context.get("npcs", []):
+                if npc["slug"].lower() in text or npc["name"].lower() in text:
+                    return AIActionResponse(
+                        type="recruit",
+                        target_slug=npc["slug"],
+                    ).to_game_action()
+
+            raise ValueError("No recruitment target found.")
+
+        if "dismiss" in text:
+            for companion in context.get("party", []):
+                if (
+                    companion["slug"].lower() in text
+                    or companion["name"].lower() in text
+                ):
+                    return AIActionResponse(
+                        type="dismiss",
+                        target_slug=companion["slug"],
+                    ).to_game_action()
+
+            raise ValueError("No companion target found.")
+
         return action_adapter.validate_python(
             {
                 "type": "inspect",

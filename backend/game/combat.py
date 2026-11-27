@@ -394,7 +394,7 @@ def resolve_npc_surrender(
     return {
         "type": "npc_surrender",
         "round": encounter.round_number,
-        "actor": participant,
+        "actor": participant.npc.npc.slug,  # pyright: ignore
         "actor_name": participant.npc.npc.name,  # pyright: ignore
         "success": True,
     }
@@ -575,8 +575,8 @@ def get_npc_combat_events(
                 GameEvent(
                     type="npc_surrendered",
                     encounter=encounter.pk,  # pyright: ignore
-                    target=action["actor"].npc.npc.slug,
-                    npc=action["actor"].npc.npc.slug,
+                    target=action["actor"],
+                    npc=action["actor"],
                     location=encounter.location.slug,  # pyright: ignore
                 )
             )

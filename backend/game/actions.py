@@ -15,6 +15,7 @@ from game.combat import (
     resolve_player_attack,
     start_combat,
 )
+from game.companions import move_companions
 from game.events import GameEvent
 from game.interactables import get_visible_interactables
 from game.interactions import resolve_interaction
@@ -300,6 +301,12 @@ def process_movement(
     session.current_location = destination  # pyright: ignore
     session.save(update_fields=["current_location", "updated_at"])
 
+    following_companions = move_companions(
+        session=session,
+        origin=current,  # pyright: ignore
+        destination=destination,
+    )
+
     narration = f"You travel from {current.name} to {destination.name}."
 
     return create_turn(
@@ -310,7 +317,8 @@ def process_movement(
         mechanical_result={  # pyright: ignore
             "type": "move",
             "from": current.slug,  # pyright: ignore
-            "destination": destination.slug,  # pyright: ignore
+            "destination": destination.slug,
+            "following_companions": following_companions,
         },
         events=[  # pyright: ignore
             GameEvent(
